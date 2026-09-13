@@ -346,16 +346,25 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 RenderApps(cached);
                 StatusText.Text = $"{cached.Count} apps";
-                _ = ExtractMissingIconsAsync();
+                _ = ExtractVisibleIconsAsync(); // only current page, not all
             }
 
             _watcher.AppsUpserted += OnWatcherUpserted;
             _watcher.AppsRemoved += OnWatcherRemoved;
             _watcher.Start();
 
-            // Full rescan runs in the background so the window paints instantly
-            // from cache. Quiet when cache was shown (no "Scanning..." flash).
-            _ = RefreshAppsAsync(quiet: cached.Count > 0);
+            // Skip the background rescan if the cache is fresh (written < 1 min ago).
+            // The 10-minute periodic timer will pick up any changes later.
+            if (_cache.IsFresh(TimeSpan.FromMinutes(1)))
+            {
+                StatusText.Text = $"{cached.Count} apps (cached)";
+            }
+            else
+            {
+                // Full rescan runs in the background so the window paints instantly
+                // from cache. Quiet when cache was shown (no "Scanning..." flash).
+                _ = RefreshAppsAsync(quiet: cached.Count > 0);
+            }
 
             // UWP and raw-exe installs have no filesystem watcher — a periodic
             // full re-scan keeps them fresh (AGENTS.md convention).
@@ -386,7 +395,7 @@ public partial class MainWindow : INotifyPropertyChanged
             await _cache.SaveAsync(_allApps).ConfigureAwait(true);
             RenderApps(_allApps);
             StatusText.Text = $"{_allApps.Count} apps";
-            _ = ExtractMissingIconsAsync();
+            _ = ExtractVisibleIconsAsync();
         }
         catch (Exception ex)
         {
@@ -573,6 +582,7 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         _pageIndex++;
         RenderPage(1);
+        _ = ExtractVisibleIconsAsync();
     }
 
     private void PreviousPage()
@@ -581,6 +591,7 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         _pageIndex--;
         RenderPage(-1);
+        _ = ExtractVisibleIconsAsync();
     }
 
     // Wheel flips pages like a book: down = right/next, up = left/previous.
@@ -1481,17 +1492,30 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // ── Icon decoding (async) ────────────────────────────────────
-    private async Task ExtractMissingIconsAsync()
+    /// <summary>
+    /// Extracts icons only for the currently visible page — keeps startup fast.
+    /// Scrolling to another page triggers extraction for that page via
+    /// RenderPage → ExtractVisibleIconsAsync.
+    /// </summary>
+    private async Task ExtractVisibleIconsAsync()
     {
-        // Snapshot: a background refresh may replace _rows mid-run.
-        foreach (var row in _rows.ToList())
+        // Snapshot only the rows on the current page (not the entire list).
+        var pageSize = Math.Max(1, _pageSize);
+        var pageStart = _pageIndex * pageSize;
+        var visibleRows = _filtered
+            .OfType<AppRow>()
+            .Skip(pageStart)
+            .Take(pageSize)
+            .Where(r => r.Icon is null)
+            .ToList();
+
+        var updatedApps = false;
+        foreach (var row in visibleRows)
         {
-            if (row.Icon is not null)
-                continue;
             var path = await _icons.ExtractAndCacheAsync(row.App);
             if (path is null)
                 continue;
-                        var source = new BitmapImage();
+            var source = new BitmapImage();
             source.BeginInit();
             source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
             source.DecodePixelWidth = 128;
@@ -1500,8 +1524,19 @@ public partial class MainWindow : INotifyPropertyChanged
             _iconMemoryCache[row.App.Id] = source;
             if (_rowsById.TryGetValue(row.App.Id, out var current))
                 current.Icon = source;
+
+            // Persist the icon cache path so next startup skips re-extraction.
+            if (row.App.IconCachePath != path)
+            {
+                row.Update(row.App.WithIconCachePath(path));
+                updatedApps = true;
+            }
         }
         Dispatcher.Invoke(() => RefreshAllGroupPreviews());
+
+        // Re-save the app list cache now that icon paths are filled in.
+        if (updatedApps)
+            await _cache.SaveAsync(_allApps);
     }
 
     // ── Watcher deltas (shortcut install/uninstall) ──────────────
@@ -1519,7 +1554,7 @@ public partial class MainWindow : INotifyPropertyChanged
             }
         }
         Dispatcher.Invoke(() => RefreshAllGroupPreviews());
-        _ = ExtractMissingIconsAsync();
+        _ = ExtractVisibleIconsAsync();
     }
 
     private async Task OnWatcherRemoved(IReadOnlyList<string> ids)

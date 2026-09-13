@@ -32,26 +32,41 @@ public sealed class AppCache
         return new AppCache(Path.Combine(dir, "apps.json"));
     }
 
-    public async Task<IReadOnlyList<AppItem>> LoadAsync(CancellationToken ct = default)
+    public async Task<(IReadOnlyList<AppItem> Apps, DateTime? SavedAt)> LoadWithAgeAsync(CancellationToken ct = default)
     {
         if (!File.Exists(_cacheFilePath))
-            return Array.Empty<AppItem>();
+            return (Array.Empty<AppItem>(), null);
 
         try
         {
             await using var stream = File.OpenRead(_cacheFilePath);
-            var envelope = await JsonSerializer.DeserializeAsync<CacheEnvelope>(
-                stream, JsonOptions, ct);
+            var envelope = await JsonSerializer.DeserializeAsync<CacheEnvelope>(stream, JsonOptions, ct);
             if (envelope?.Version != CurrentVersion || envelope.Apps is null)
-                return Array.Empty<AppItem>();
-            return envelope.Apps;
+                return (Array.Empty<AppItem>(), null);
+            return (envelope.Apps, envelope.SavedAtUtc);
         }
         catch (Exception)
         {
-            // Corrupt cache — ignore it, a fresh scan will rewrite it.
-            // Must never crash startup.
-            return Array.Empty<AppItem>();
+            return (Array.Empty<AppItem>(), null);
         }
+    }
+
+    /// <summary>Backward-compatible load — discards the save timestamp.</summary>
+    public async Task<IReadOnlyList<AppItem>> LoadAsync(CancellationToken ct = default)
+    {
+        var (apps, _) = await LoadWithAgeAsync(ct);
+        return apps;
+    }
+
+    /// <summary>
+    /// Returns true if the cache file exists and was written within the given age.
+    /// </summary>
+    public bool IsFresh(TimeSpan maxAge)
+    {
+        if (!File.Exists(_cacheFilePath))
+            return false;
+        var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(_cacheFilePath);
+        return age <= maxAge;
     }
 
     public async Task SaveAsync(IReadOnlyList<AppItem> apps, CancellationToken ct = default)
