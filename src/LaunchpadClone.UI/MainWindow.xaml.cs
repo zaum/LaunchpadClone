@@ -677,9 +677,11 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // Walks up the click source to the list-item that carries the tile.
-    private ListBoxItem? FindTileContainer(DependencyObject? source)
+    // Uses VisualHelper so non-Control elements (Grid, Image, TextBlock)
+    // in the DataTemplate do not break the tree walk.
+    private static ListBoxItem? FindTileContainer(DependencyObject? source)
     {
-        for (var node = source; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
             if (node is ListBoxItem item)
                 return item;
         return null;
@@ -688,7 +690,7 @@ public partial class MainWindow : INotifyPropertyChanged
     private ListBoxItem? FindMemberContainer(DependencyObject? source)
     {
         // Same walk, but only within the group members list.
-        for (var node = source; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
             if (node is ListBoxItem item && GroupMembers.ItemContainerGenerator?.ItemFromContainer(item) is not null)
                 return item;
         return null;
@@ -738,7 +740,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private AppRow? FindRowFromSender(object sender)
     {
-        for (var node = sender as DependencyObject; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
+        for (var node = sender as DependencyObject; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
             if (node is ListBoxItem item && item.DataContext is AppRow r)
                 return r;
         return null;
@@ -746,7 +748,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private GroupRow? FindGroupFromSender(object sender)
     {
-        for (var node = sender as DependencyObject; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
+        for (var node = sender as DependencyObject; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
             if (node is ListBoxItem item && item.DataContext is GroupRow g)
                 return g;
         return null;
