@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -637,6 +638,27 @@ public partial class MainWindow : INotifyPropertyChanged
         return false;
     }
 
+    /// <summary>
+    /// Checks whether the click landed on an interactive control (settings gear,
+    /// page dots, context menus, scrollbars, etc.) so we don't pre-emptively
+    /// close the launcher before the control's own click handler fires.
+    /// </summary>
+    private static bool IsWithinControl(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.Button || node is System.Windows.Controls.MenuItem
+                || node is System.Windows.Controls.Slider
+                || node is System.Windows.Controls.CheckBox
+                || node is System.Windows.Controls.TextBox
+                || node is System.Windows.Controls.ContextMenu
+                || node is System.Windows.Controls.Primitives.ScrollBar
+                || node is System.Windows.Controls.Primitives.RepeatButton)
+                return true;
+        }
+        return false;
+    }
+
     private void OnClearSearch(object sender, MouseButtonEventArgs e)
     {
         SearchBox.Text = "";
@@ -1200,7 +1222,13 @@ public partial class MainWindow : INotifyPropertyChanged
         if (IsWithinSearch(e.OriginalSource as DependencyObject))
             return;
 
-        if (FindMemberContainer(e.OriginalSource as DependencyObject) is { } member
+        // Let interactive controls (settings gear, context menus, etc.) handle
+        // their own clicks — don't pre-emptively close the launcher.
+        var clickSource = e.OriginalSource as DependencyObject;
+        if (IsWithinControl(clickSource))
+            return;
+
+        if (FindMemberContainer(clickSource) is { } member
             && member.DataContext is AppRow groupApp)
         {
             AppLauncher.Launch(groupApp.App);
@@ -1208,7 +1236,7 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         }
 
-        if (FindTileContainer(e.OriginalSource as DependencyObject) is { } container)
+        if (FindTileContainer(clickSource) is { } container)
         {
             if (container.DataContext is GroupRow g)
                 OpenGroup(g);
@@ -1220,7 +1248,7 @@ public partial class MainWindow : INotifyPropertyChanged
             }
         }
 
-        // Click on empty area (outside tiles and search) → close the launcher.
+        // Click on empty area (outside tiles, search, and controls) → close.
         Close();
     }
     // ── Global hotkey: native polling (robust, no window hook) ────
