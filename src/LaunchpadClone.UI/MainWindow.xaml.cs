@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -288,6 +289,7 @@ public partial class MainWindow : INotifyPropertyChanged
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
         ApplySettings(App.Settings);
+        UpdateGridSizeLabel(App.Settings.TileScale);
         SettingsOverlay.Visibility = Visibility.Visible;
     }
 
@@ -1307,7 +1309,41 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         App.Settings.TileScale = e.NewValue / 100.0;
         ApplySettings(App.Settings);
+        UpdateGridSizeLabel(e.NewValue / 100.0);
         CommitSettings();
+    }
+
+    private void OnSliderLoaded(object sender, RoutedEventArgs e)
+    {
+        UpdateGridSizeLabel(App.Settings.TileScale);
+    }
+
+    private void UpdateGridSizeLabel(double scale)
+    {
+        if (GridSizeLabel is null)
+            return;
+        var tileW = Math.Round(168 * scale);
+        var tileH = Math.Round(112 * scale);
+        var cols = Math.Max(1, (int)((ActualWidth - 80) / (tileW + 16)));
+        var rows = Math.Max(1, (int)((ActualHeight - 200) / (tileH + 52)));
+        GridSizeLabel.Text = $"{cols} × {rows}";
+    }
+
+    private void OnOpenAppFolder(object sender, RoutedEventArgs e)
+    {
+        // ContextMenu is not in the visual tree, so resolve the row via PlacementTarget.
+        var menuItem = sender as MenuItem;
+        var contextMenu = menuItem?.Parent as ContextMenu;
+        var target = contextMenu?.PlacementTarget as FrameworkElement;
+        if (target?.DataContext is AppRow row)
+        {
+            var path = row.App.TargetPath;
+            if (row.App.Kind == AppKind.Uwp)
+                return;
+            var folder = Path.GetDirectoryName(path);
+            if (folder is not null && Directory.Exists(folder))
+                Process.Start(new ProcessStartInfo("explorer.exe", $"select,\"{path}\"") { UseShellExecute = true });
+        }
     }
 
     private string _pendingHotKey = "";
