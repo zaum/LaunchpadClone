@@ -178,7 +178,7 @@
             </Border>
 
                       <!-- Settings gear (top-right corner) -->
-            <Button Click="OnOpenSettings" ToolTip="Settings" Cursor="Hand"
+            <Button x:Name="SettingsGearButton" Click="OnOpenSettings" ToolTip="Settings" Cursor="Hand"
                     HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,48,48,0"
                     Width="40" Height="40"
                     FontSize="18" Foreground="#E8E9EE" Content="⚙"

@@ -650,6 +650,18 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// <summary>
+    /// Checks whether the click landed on the settings gear button.
+    /// </summary>
+    private bool IsWithinSettingsGear(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+            if (node == SettingsGearButton)
+                return true;
+        return false;
+    }
+
+    /// <summary>
     /// Checks whether the click landed on an interactive control (settings gear,
     /// page dots, context menus, scrollbars, etc.) so we don't pre-emptively
     /// close the launcher before the control's own click handler fires.
@@ -703,6 +715,10 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
 
         if (IsWithinSearch(e.OriginalSource as DependencyObject))
+            return;
+
+        // Skip the settings gear button — let its Click handler open the overlay.
+        if (IsWithinSettingsGear(e.OriginalSource as DependencyObject))
             return;
 
         // Let interactive controls (settings gear, buttons, etc.) handle their
@@ -1240,9 +1256,13 @@ public partial class MainWindow : INotifyPropertyChanged
         if (IsWithinSearch(e.OriginalSource as DependencyObject))
             return;
 
+        // Skip the settings gear button — let its Click handler open the overlay.
+        var clickSource = e.OriginalSource as DependencyObject;
+        if (IsWithinSettingsGear(clickSource))
+            return;
+
         // Let interactive controls (settings gear, context menus, etc.) handle
         // their own clicks — don't pre-emptively close the launcher.
-        var clickSource = e.OriginalSource as DependencyObject;
         if (IsWithinControl(clickSource))
             return;
 
