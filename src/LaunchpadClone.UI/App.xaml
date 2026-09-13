@@ -1,0 +1,8 @@
+<Application x:Class="LaunchpadClone.UI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <!-- Accent color shared by selection, dots and settings highlights. -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#6C8CFF" />
+    </Application.Resources>
+</Application>
