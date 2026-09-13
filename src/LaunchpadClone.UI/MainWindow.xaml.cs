@@ -631,13 +631,13 @@ public partial class MainWindow : INotifyPropertyChanged
     // ── Gesture / positioning helpers ─────────────────────────────
     private bool IsWithinSearch(DependencyObject? source)
     {
-        for (var node = source; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
-            if (node == SearchBox || (ClearSearchButton is not null && node == ClearSearchButton))
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+            if (node == SearchBox || node == ClearSearchButton)
                 return true;
         return false;
     }
 
-    private void OnClearSearch(object sender, RoutedEventArgs e)
+    private void OnClearSearch(object sender, MouseButtonEventArgs e)
     {
         SearchBox.Text = "";
         SearchBox.Focus();
@@ -1216,8 +1216,12 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 AppLauncher.Launch(app.App);
                 Close();
+                return;
             }
         }
+
+        // Click on empty area (outside tiles and search) → close the launcher.
+        Close();
     }
     // ── Global hotkey: native polling (robust, no window hook) ────
     [DllImport("user32.dll")]
@@ -1342,7 +1346,10 @@ public partial class MainWindow : INotifyPropertyChanged
                 return;
             var folder = Path.GetDirectoryName(path);
             if (folder is not null && Directory.Exists(folder))
+            {
                 Process.Start(new ProcessStartInfo("explorer.exe", $"select,\"{path}\"") { UseShellExecute = true });
+                Close(); // close the launcher so the folder is frontmost
+            }
         }
     }
 

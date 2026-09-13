@@ -27,12 +27,7 @@
         <DataTemplate x:Key="AppTileTemplate">
             <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}">
                 <Grid.ToolTip>
-                    <StackPanel MaxWidth="300">
-                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13"
-                                   Foreground="White" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding App.TargetPath}" FontSize="10"
-                                   Foreground="#9AA0AE" Margin="0,4,0,0" TextWrapping="Wrap" />
-                    </StackPanel>
+                    <TextBlock Text="{Binding DisplayName}" FontSize="13" Foreground="White" />
                 </Grid.ToolTip>
                 <Grid.ContextMenu>
                     <ContextMenu Background="#222329" Foreground="White" BorderThickness="0">
@@ -155,13 +150,12 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
-                    <Button x:Name="ClearSearchButton" Content="×" ToolTip="Clear search"
-                            Cursor="Hand" Width="32" Height="32" FontSize="18"
-                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
-                            Foreground="#CCFFFFFF" Background="Transparent" BorderThickness="0"
-                            Click="OnClearSearch">
-                        <Button.Style>
-                            <Style TargetType="Button">
+                    <TextBlock x:Name="ClearSearchButton" Text="×" ToolTip="Clear search"
+                               Cursor="Hand" FontSize="18" HorizontalAlignment="Right"
+                               VerticalAlignment="Center" Margin="0,0,12,0" Foreground="#CCFFFFFF"
+                               MouseLeftButtonUp="OnClearSearch">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Visible" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
@@ -169,8 +163,8 @@
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </Button.Style>
-                    </Button>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </Grid>
             </Border>
 
