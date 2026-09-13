@@ -416,41 +416,7 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             var row = new AppRow(app);
             if (_iconMemoryCache.TryGetValue(app.Id, out var icon))
-            {
                 row.Icon = icon;
-            }
-            else
-            {
-                // On startup, try to load the icon from disk cache immediately
-                // so tiles show their icons without waiting for async extraction.
-                var iconPath = app.IconCachePath;
-                if (string.IsNullOrEmpty(iconPath))
-                {
-                    // Fall back to the standard cache filename pattern.
-                    var defaultDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "LaunchpadClone", "icons");
-                    var defaultPath = Path.Combine(defaultDir, $"{app.Id}.jumbo.png");
-                    if (File.Exists(defaultPath))
-                        iconPath = defaultPath;
-                }
-                if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
-                {
-                    try
-                    {
-                        var source = new BitmapImage();
-                        source.BeginInit();
-                        source.UriSource = new Uri("file:///" + iconPath.Replace("\\", "/"));
-                        source.DecodePixelWidth = 128;
-                        source.CacheOption = BitmapCacheOption.OnLoad;
-                        source.Freeze(); // can only be frozen on the UI thread — allows cross-thread
-                        source.EndInit();
-                        _iconMemoryCache[app.Id] = source;
-                        row.Icon = source;
-                    }
-                    catch { /* corrupt cache — let async extraction retry */ }
-                }
-            }
             _rows.Add(row);
             _rowsById[app.Id] = row;
         }
