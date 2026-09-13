@@ -27,7 +27,16 @@
         <DataTemplate x:Key="AppTileTemplate">
             <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}">
                 <Grid.ToolTip>
-                    <TextBlock Text="{Binding DisplayName}" FontSize="13" Foreground="White" />
+                    <ToolTip>
+                        <ToolTip.Template>
+                            <ControlTemplate TargetType="ToolTip">
+                                <Border Background="#2A2B32" CornerRadius="6" Padding="10,6" BorderThickness="0">
+                                    <ContentPresenter />
+                                </Border>
+                            </ControlTemplate>
+                        </ToolTip.Template>
+                        <TextBlock Text="{Binding DisplayName}" FontSize="13" Foreground="#E8E9EE" />
+                    </ToolTip>
                 </Grid.ToolTip>
                 <Grid.ContextMenu>
                     <ContextMenu Background="#222329" Foreground="White" BorderThickness="0">
