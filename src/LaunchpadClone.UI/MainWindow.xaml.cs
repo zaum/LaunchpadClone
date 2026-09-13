@@ -400,7 +400,7 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         _rows.Clear();
         _rowsById.Clear();
-        foreach (var app in apps)
+        foreach (var app in apps.DistinctBy(a => a.Id))
         {
             var row = new AppRow(app);
             if (_iconMemoryCache.TryGetValue(app.Id, out var icon))
@@ -508,17 +508,7 @@ public partial class MainWindow : INotifyPropertyChanged
             : $"{_filtered.Count} apps";
 
         if (direction != 0)
-        {
             AnimatePage(direction);
-            // Dots brighten on a flip, then fade back (macOS behavior).
-            PageDots.BeginAnimation(OpacityProperty, null);
-            PageDots.Opacity = 1;
-            var fade = new DoubleAnimation(0.45, TimeSpan.FromMilliseconds(400))
-            {
-                BeginTime = TimeSpan.FromSeconds(1.2)
-            };
-            PageDots.BeginAnimation(OpacityProperty, fade);
-        }
     }
 
     private void UpdatePageDots(int pageCount)
@@ -539,20 +529,17 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
+    // Page flip glides like moving within one wide surface: a single soft
+    // horizontal slide, no fading — the new page drifts in from the side.
     private void AnimatePage(int direction)
     {
-        const double travel = 96;
+        const double travel = 180;
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
         PageSlide.BeginAnimation(TranslateTransform.XProperty, null);
         PageSlide.X = direction * travel;
         PageSlide.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(0, TimeSpan.FromMilliseconds(280)) { EasingFunction = ease });
-
-        AppsList.BeginAnimation(OpacityProperty, null);
-        AppsList.Opacity = 0.35;
-        AppsList.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
+            new DoubleAnimation(0, TimeSpan.FromMilliseconds(450)) { EasingFunction = ease });
     }
 
     // Tile cell footprint must match the template (tile width + 8px side
@@ -643,9 +630,15 @@ public partial class MainWindow : INotifyPropertyChanged
     private bool IsWithinSearch(DependencyObject? source)
     {
         for (var node = source; node is not null; node = (node as System.Windows.Controls.Control)?.Parent)
-            if (node == SearchBox)
+            if (node == SearchBox || (ClearSearchButton is not null && node == ClearSearchButton))
                 return true;
         return false;
+    }
+
+    private void OnClearSearch(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = "";
+        SearchBox.Focus();
     }
 
     // Walks up the click source to the list-item that carries the tile.

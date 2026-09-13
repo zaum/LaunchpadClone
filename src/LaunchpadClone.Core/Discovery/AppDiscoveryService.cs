@@ -49,14 +49,89 @@ public sealed class AppDiscoveryService : IAppDiscoveryService
         // that shortcut resolution actually landed on.
         all.AddRange(executablesTask.Result.Where(exe =>
             !shortcutsTask.Result.ResolvedExePaths.Contains(exe.TargetPath)));
-        return all;
+        return DedupeApps(all, shortcutsTask.Result.ResolvedExeByLnk);
     }
 
     /// <summary>
-    /// Shortcut scan outcome: the app items plus every exe path their .lnk
-    /// targets resolved to (used to dedupe the raw-exe scan).
+    /// Collapses duplicate tiles so each app appears once: shortcuts that
+    /// resolve to the same exe keep one entry, and a raw Program Files exe
+    /// that shares its display name with a shortcut/UWP entry loses to the
+    /// curated one. Shortcuts with distinct targets are kept (e.g. two
+    /// vendors' "Check for Updates" are genuinely different apps).
     /// </summary>
-    private sealed record ShortcutScanOutcome(List<AppItem> Items, IReadOnlySet<string> ResolvedExePaths);
+    private static List<AppItem> DedupeApps(
+        List<AppItem> all, IReadOnlyDictionary<string, string> resolvedExeByLnk)
+    {
+        var byId = new Dictionary<string, AppItem>(StringComparer.Ordinal);
+        foreach (var app in all)
+            if (!byId.ContainsKey(app.Id))
+                byId[app.Id] = app;
+        var items = byId.Values.ToList();
+
+        // Same exe behind several .lnk files (root + subfolder copies).
+        var dropIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in items
+            .Where(a => a.Kind == AppKind.Shortcut)
+            .GroupBy(
+                a => ResolvedExeOf(a, resolvedExeByLnk) ?? ("lnk:" + a.Id),
+                StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1))
+        {
+            var keep = group
+                .OrderBy(a => a.TargetPath.Length)
+                .ThenBy(a => a.TargetPath, StringComparer.OrdinalIgnoreCase)
+                .First();
+            foreach (var app in group)
+                if (app.Id != keep.Id)
+                    dropIds.Add(app.Id);
+        }
+        items = items.Where(a => !dropIds.Contains(a.Id)).ToList();
+
+        // Same display name across sources: one tile wins
+        // (Shortcut, then UWP, then raw exe).
+        var result = new List<AppItem>(items.Count);
+        foreach (var group in items.GroupBy(
+            a => a.DisplayName.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            var list = group.ToList();
+            if (list.Count == 1)
+            {
+                result.Add(list[0]);
+                continue;
+            }
+            if (list.All(a => a.Kind == AppKind.Shortcut)
+                && list.Select(a => ResolvedExeOf(a, resolvedExeByLnk) ?? ("lnk:" + a.Id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count() == list.Count)
+            {
+                result.AddRange(list); // distinct apps sharing a generic name
+                continue;
+            }
+            result.Add(list
+                .OrderBy(a => a.Kind switch
+                {
+                    AppKind.Shortcut => 0,
+                    AppKind.Uwp => 1,
+                    _ => 2
+                })
+                .ThenBy(a => a.TargetPath.Length)
+                .ThenBy(a => a.TargetPath, StringComparer.OrdinalIgnoreCase)
+                .First());
+        }
+        return result;
+    }
+
+    private static string? ResolvedExeOf(AppItem app, IReadOnlyDictionary<string, string> map) =>
+        app.Kind == AppKind.Shortcut && map.TryGetValue(app.TargetPath, out var exe) ? exe : null;
+
+    /// <summary>
+    /// Shortcut scan outcome: the app items, every exe path their .lnk
+    /// targets resolved to (used to dedupe the raw-exe scan), plus the
+    /// per-shortcut mapping (used to collapse duplicate .lnk copies).
+    /// </summary>
+    private sealed record ShortcutScanOutcome(
+        List<AppItem> Items,
+        IReadOnlySet<string> ResolvedExePaths,
+        IReadOnlyDictionary<string, string> ResolvedExeByLnk);
 
     public Task<AppItem?> ScanShortcutAsync(string lnkPath, CancellationToken ct = default)
         => Task.Run(() => ResolveShortcutAppItem(lnkPath).Item, ct);
@@ -73,6 +148,7 @@ public sealed class AppDiscoveryService : IAppDiscoveryService
 
         var results = new ConcurrentBag<AppItem>();
         var resolvedExePaths = new ConcurrentBag<string>();
+        var resolvedByLnk = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // NOTE: ShellLinkResolver uses STA COM (IShellLinkW). Parallel.ForEachAsync
         // runs on MTA pool threads, so each resolve is marshalled onto a
@@ -85,13 +161,17 @@ public sealed class AppDiscoveryService : IAppDiscoveryService
                 if (item is not null)
                     results.Add(item);
                 if (resolvedExe is not null)
+                {
                     resolvedExePaths.Add(resolvedExe);
+                    resolvedByLnk[path] = resolvedExe;
+                }
                 return ValueTask.CompletedTask;
             });
 
         return new ShortcutScanOutcome(
             results.ToList(),
-            resolvedExePaths.ToHashSet(StringComparer.OrdinalIgnoreCase));
+            resolvedExePaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
+            resolvedByLnk);
     }
 
     private static IEnumerable<string> SafeEnumerateLnkFiles(string root)

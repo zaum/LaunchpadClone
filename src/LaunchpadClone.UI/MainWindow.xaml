@@ -126,10 +126,10 @@
                     <DropShadowEffect BlurRadius="20" ShadowDepth="1" Opacity="0.35" />
                 </Border.Effect>
                 <Grid>
-                    <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="16,0"
+                    <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="16,0,48,0"
                              Background="Transparent" BorderThickness="0" CaretBrush="#FFFFFF"
                              Foreground="#FFFFFF" VerticalContentAlignment="Center" />
-                    <TextBlock Text="Search" FontSize="15" Margin="20,0,0,0" Foreground="#99FFFFFF"
+                    <TextBlock Text="Search" FontSize="15" Margin="20,0,48,0" Foreground="#99FFFFFF"
                                VerticalAlignment="Center" IsHitTestVisible="False">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -142,6 +142,22 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+                    <Button x:Name="ClearSearchButton" Content="×" ToolTip="Clear search"
+                            Cursor="Hand" Width="32" Height="32" FontSize="18"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
+                            Foreground="#CCFFFFFF" Background="Transparent" BorderThickness="0"
+                            Click="OnClearSearch">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
 
@@ -149,10 +165,13 @@
             <Button Click="OnOpenSettings" ToolTip="Settings" Cursor="Hand"
                     HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,48,48,0"
                     Width="40" Height="40"
-                    FontSize="18" Foreground="#E8E9EE" Content="⚙">
-                <Button.Background>
-                    <SolidColorBrush Color="Transparent" />
-                </Button.Background>
+                    FontSize="18" Foreground="#E8E9EE" Content="⚙"
+                    Background="Transparent" BorderThickness="0">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </ControlTemplate>
+                </Button.Template>
             </Button>
 
             <!-- Paged grid; PageSlide drives the soft page-flip animation. -->
