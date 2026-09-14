@@ -5,9 +5,8 @@
         Title="Launchpad" WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" WindowState="Maximized" Topmost="True"
         ShowInTaskbar="False" ResizeMode="NoResize" ShowActivated="True"
-        FontFamily="Segoe UI Variable Display, Segoe UI"
-        AllowDrop="True"
-        MouseLeftButtonDown="OnMouseLeftButtonDown"
+         FontFamily="Segoe UI Variable Display, Segoe UI"
+         MouseLeftButtonDown="OnMouseLeftButtonDown"
         MouseMove="OnMouseMove"
         PreviewKeyDown="OnPreviewKeyDown"
         PreviewMouseWheel="OnPreviewMouseWheel">
@@ -190,11 +189,10 @@
                 </Button.Template>
             </Button>
 
-            <!-- Paged grid; PageSlide drives the soft page-flip animation. -->
+            <!-- Paged grid; PageSlide drives the soft page-flip animation.
+                 Custom mouse-ghost drag only (no Ole DragDrop). -->
             <ListBox x:Name="AppsList" Grid.Row="1" Margin="40,12,40,0"
                      Background="Transparent" BorderThickness="0"
-                     AllowDrop="True"
-                     DragEnter="OnDragEnter" DragOver="OnDragOver" Drop="OnDrop"
                      ItemTemplateSelector="{StaticResource TileSelector}"
                      ItemContainerStyle="{StaticResource TileItemStyle}"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -233,8 +231,6 @@
                              BorderThickness="0" CaretBrush="White"
                              VerticalContentAlignment="Center" Margin="0,0,0,24" />
                     <ListBox x:Name="GroupMembers" Background="Transparent" BorderThickness="0"
-                             AllowDrop="True"
-                             DragEnter="OnDragEnter" DragOver="OnDragOver" Drop="OnDrop"
                              ItemTemplate="{StaticResource AppTileTemplate}"
                              ItemContainerStyle="{StaticResource TileItemStyle}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -245,7 +241,7 @@
                             </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
                     </ListBox>
-                    <TextBlock Text="double-click/Enter — launch · drag out — remove · ✕ — remove · Esc — close"
+                    <TextBlock Text="click/Enter — launch · drag out — remove · ✕ — remove · Esc — close"
                                HorizontalAlignment="Center" Margin="0,20,0,0"
                                Foreground="#80FFFFFF" FontSize="12" />
                 </StackPanel>
@@ -305,7 +301,7 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <TickBar Grid.Row="0" Name="TopTick" Placement="BottomRight"
+                                        <TickBar Grid.Row="0" Name="TopTick" Placement="Bottom"
                                                  Fill="#9AA0AE" TickFrequency="5" Minimum="70" Maximum="140"
                                                  Height="8" Margin="10,0,10,4" Visibility="Collapsed" />
                                         <Border Grid.Row="1" Height="4" Background="#33FFFFFF" CornerRadius="2"

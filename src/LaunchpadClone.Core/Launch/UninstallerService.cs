@@ -63,18 +63,8 @@ public static class UninstallerService
 
     private static string? ResolveShortcutTarget(string lnkPath)
     {
-        ResolvedShortcut? resolved = null;
-        // IShellLinkW is STA — same dedicated-thread pattern as discovery.
-        var thread = new Thread(() =>
-        {
-            try { resolved = ShellLinkResolver.Resolve(lnkPath); }
-            catch { resolved = null; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
-        return resolved?.TargetPath;
+        // IShellLinkW is STA — shared StaRunner helper (see discovery).
+        return StaRunner.RunSilent(() => ShellLinkResolver.Resolve(lnkPath))?.TargetPath;
     }
     private static string? FindRegistryUninstallString(string displayName, string? targetPath)
     {
@@ -92,9 +82,11 @@ public static class UninstallerService
         var needle = displayName.Trim().ToLowerInvariant();
         if (needle.Length == 0)
             return null;
+        // Strip the extension: registry DisplayNames never contain ".exe",
+        // so "code.exe" would never match "Visual Studio Code" otherwise.
         var targetFile = targetPath is null
             ? null
-            : Path.GetFileName(targetPath).ToLowerInvariant();
+            : Path.GetFileNameWithoutExtension(targetPath).ToLowerInvariant();
 
         foreach (var root in roots)
         {
@@ -118,8 +110,13 @@ public static class UninstallerService
                                 continue;
 
                             var nameLower = name.ToLowerInvariant();
-                            var matches = nameLower.Contains(needle)
-                                || (targetFile is not null && nameLower.Contains(targetFile));
+                            // Exact match wins. Substring matches require a
+                            // meaningful needle (>= 4 chars) so "Mail" cannot
+                            // match "Gmail Notifier" and uninstall the wrong app.
+                            var matches = nameLower.Equals(needle, StringComparison.Ordinal)
+                                || (needle.Length >= 4 && nameLower.Contains(needle, StringComparison.Ordinal))
+                                || (targetFile is not null && targetFile.Length >= 4
+                                    && nameLower.Contains(targetFile, StringComparison.Ordinal));
                             if (!matches)
                                 continue;
 

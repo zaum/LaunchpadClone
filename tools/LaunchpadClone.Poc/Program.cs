@@ -20,7 +20,9 @@ if (cached.Count > 0)
     Console.WriteLine($"{cached.Count} apps loaded from cache (instant).");
 
 var sw = System.Diagnostics.Stopwatch.StartNew();
-var apps = await discovery.ScanAllAsync();
+var progress = new Progress<ScanProgress>(p =>
+    Console.WriteLine($"  ...{p.Count} {p.Stage}"));
+var apps = await discovery.ScanAllAsync(CancellationToken.None, progress);
 await appCache.SaveAsync(apps);
 
 Console.WriteLine($"{apps.Count} apps found in {sw.ElapsedMilliseconds} ms.");

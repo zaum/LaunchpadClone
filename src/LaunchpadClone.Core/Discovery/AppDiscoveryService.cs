@@ -7,11 +7,14 @@ namespace LaunchpadClone.Core.Discovery;
 public interface IAppDiscoveryService
 {
     /// <summary>Full discovery — called at startup or on manual refresh.</summary>
-    Task<IReadOnlyList<AppItem>> ScanAllAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<AppItem>> ScanAllAsync(CancellationToken ct = default, IProgress<ScanProgress>? progress = null);
 
     /// <summary>Re-analyze a single .lnk — for watcher delta refresh (phase 2).</summary>
     Task<AppItem?> ScanShortcutAsync(string lnkPath, CancellationToken ct = default);
 }
+
+/// <summary>Progress report emitted while a full scan runs — one per source.</summary>
+public sealed record ScanProgress(string Stage, int Count);
 
 public sealed class AppDiscoveryService : IAppDiscoveryService
 {
@@ -30,14 +33,29 @@ public sealed class AppDiscoveryService : IAppDiscoveryService
         _executableProvider = executableProvider;
     }
 
-    public async Task<IReadOnlyList<AppItem>> ScanAllAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<AppItem>> ScanAllAsync(CancellationToken ct = default, IProgress<ScanProgress>? progress = null)
     {
         var shortcutsTask = ScanShortcutsCoreAsync(ct);
         var uwpTask = _uwpProvider.GetInstalledAppsAsync(ct);
         var executablesTask = _executableProvider is null
             ? Task.FromResult(new List<AppItem>())
             : _executableProvider.GetInstalledAppsAsync(ct);
-        await Task.WhenAll(shortcutsTask, uwpTask, executablesTask);
+
+        // Report each source as it finishes so the UI can show a live
+        // "Loading... N apps" counter instead of a frozen screen.
+        var pending = new List<Task> { shortcutsTask, uwpTask, executablesTask };
+        while (pending.Count > 0)
+        {
+            var done = await Task.WhenAny(pending);
+            pending.Remove(done);
+            await done; // rethrow — same failure semantics as WhenAll
+            if (done == shortcutsTask)
+                progress?.Report(new ScanProgress("Shortcuts", shortcutsTask.Result.Items.Count));
+            else if (done == uwpTask)
+                progress?.Report(new ScanProgress("Store apps", uwpTask.Result.Count));
+            else
+                progress?.Report(new ScanProgress("Programs", executablesTask.Result.Count));
+        }
 
         var all = new List<AppItem>(
             shortcutsTask.Result.Items.Count + uwpTask.Result.Count + executablesTask.Result.Count);
@@ -214,22 +232,7 @@ public sealed class AppDiscoveryService : IAppDiscoveryService
     {
         // IShellLinkW is an STA COM object — resolve it on a dedicated STA
         // thread so MTA pool threads (Parallel.ForEachAsync, Task.Run) work.
-        ResolvedShortcut? resolved = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                resolved = ShellLinkResolver.Resolve(lnkPath);
-            }
-            catch
-            {
-                resolved = null;
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
+        var resolved = StaRunner.RunSilent(() => ShellLinkResolver.Resolve(lnkPath));
 
         if (resolved is null || string.IsNullOrWhiteSpace(resolved.TargetPath))
             return (null, null);

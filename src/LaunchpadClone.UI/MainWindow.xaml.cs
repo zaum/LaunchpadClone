@@ -163,6 +163,7 @@ public partial class MainWindow : INotifyPropertyChanged
     private readonly Dictionary<string, ImageSource> _iconMemoryCache = new(StringComparer.Ordinal);
     private readonly object _iconLock = new();
     private List<AppItem> _allApps = new();
+    private CancellationTokenSource? _iconCts;
 
     private List<AppGroup> _groups = new();
     private readonly List<GroupRow> _groupRows = new();
@@ -191,6 +192,21 @@ public partial class MainWindow : INotifyPropertyChanged
     private bool _jiggleMode;
     private DispatcherTimer? _holdTimer;
 
+    // True once dismissal started — Close() while closing throws
+    // InvalidOperationException, and Deactivated fires mid-close (focus moves
+    // away as the window tears down), so every dismissal goes through
+    // Dismiss() exactly once.
+    private bool _dismissing;
+
+    /// <summary>Closes the overlay once — re-entrant calls are ignored.</summary>
+    private void Dismiss()
+    {
+        if (_dismissing)
+            return;
+        _dismissing = true;
+        Close();
+    }
+
     // Global hotkey ("open" shortcut from settings) — polled via user32.
     private DispatcherTimer? _hotKeyTimer;
     private int _hotKeyVk;
@@ -198,8 +214,8 @@ public partial class MainWindow : INotifyPropertyChanged
     private const int VkControl = 0x11;
     private const int VkAlt = 0x12;
     private const int VkShift = 0x10;
-    private const int VkWin = 0x5B;
-    private const int VkSpace = 0x20;
+    private const int VkWinLeft = 0x5B;
+    private const int VkWinRight = 0x5C;
 
     public MainWindow()
     {
@@ -215,12 +231,12 @@ public partial class MainWindow : INotifyPropertyChanged
         InitializeComponent();
 
         // Gestures and overlay controls.
-        AppsList.MouseDoubleClick += (_, _) => LaunchSelected();
+        // Single click launches (macOS style) via OnMouseLeftButtonUp —
+        // no DoubleClick handler on purpose: it would fire a second launch.
         AppsList.SizeChanged += (_, _) => RecomputeLayout();
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
-        GroupMembers.MouseDoubleClick += (_, _) => LaunchSelected();
         GroupNameBox.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter)
@@ -234,6 +250,10 @@ public partial class MainWindow : INotifyPropertyChanged
         SearchBox.TextChanged += (_, _) => ApplyFilter();
         Loaded += OnLoaded;
         Closed += (_, _) => App.SettingsChanged -= OnAppSettingsChanged;
+        // Alt+Tab away (or any focus loss) dismisses the overlay like a click
+        // outside would — the window is fullscreen Topmost, so "outside"
+        // clicks land on empty area, but focus loss needs this handler.
+        Deactivated += (_, _) => Dismiss();
 
         App.SettingsChanged += OnAppSettingsChanged;
         ApplySettings(App.Settings);
@@ -255,6 +275,9 @@ public partial class MainWindow : INotifyPropertyChanged
         _hotKeyTimer?.Stop();
         _hotKeyTimer = null;
         _holdTimer?.Stop();
+        _iconCts?.Cancel();
+        _iconCts?.Dispose();
+        _iconCts = null;
         base.OnClosed(e);
     }
 
@@ -389,7 +412,14 @@ public partial class MainWindow : INotifyPropertyChanged
             StatusText.Text = "Scanning...";
         try
         {
-            var apps = await _discovery.ScanAllAsync().ConfigureAwait(true);
+            // Live counter: each discovery source reports as it finishes.
+            var seen = 0;
+            var progress = new Progress<ScanProgress>(p =>
+            {
+                seen += p.Count;
+                StatusText.Text = $"Loading... {seen} apps ({p.Stage})";
+            });
+            var apps = await _discovery.ScanAllAsync(CancellationToken.None, progress).ConfigureAwait(true);
             _allApps = apps.OrderBy(
                 a => a.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
             await _cache.SaveAsync(_allApps).ConfigureAwait(true);
@@ -515,9 +545,12 @@ public partial class MainWindow : INotifyPropertyChanged
         AppsList.SelectedIndex = slice.Count > 0 ? 0 : -1;
 
         UpdatePageDots(pageCount);
-        StatusText.Text = pageCount > 1
-            ? $"page {_pageIndex + 1}/{pageCount} of {_filtered.Count} apps — drag, scroll or PgUp/PgDn to flip"
-            : $"{_filtered.Count} apps";
+        // While a background rescan runs, RefreshAppsAsync owns the status
+        // line ("Scanning...") — do not overwrite it from every RenderPage.
+        if (!_refreshing)
+            StatusText.Text = pageCount > 1
+                ? $"page {_pageIndex + 1}/{pageCount} of {_filtered.Count} apps — drag, scroll or PgUp/PgDn to flip"
+                : $"{_filtered.Count} apps";
 
         if (direction != 0)
             AnimatePage(direction);
@@ -528,14 +561,16 @@ public partial class MainWindow : INotifyPropertyChanged
         PageDots.Children.Clear();
         for (var i = 0; i < pageCount; i++)
         {
+            var brush = new SolidColorBrush(i == _pageIndex
+                ? System.Windows.Media.Color.FromRgb(0x6C, 0x8C, 0xFF)
+                : System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF));
+            brush.Freeze();
             var dot = new System.Windows.Shapes.Ellipse
             {
                 Width = i == _pageIndex ? 9 : 7,
                 Height = 7,
                 Margin = new Thickness(3, 0, 3, 0),
-                Fill = new SolidColorBrush(i == _pageIndex
-                    ? System.Windows.Media.Color.FromRgb(0x6C, 0x8C, 0xFF)
-                    : System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF))
+                Fill = brush
             };
             PageDots.Children.Add(dot);
         }
@@ -556,6 +591,19 @@ public partial class MainWindow : INotifyPropertyChanged
 
     // Tile cell footprint must match the template (tile width + 8px side
     // padding horizontally; icon + label + 12px vertical padding).
+    // Single source of truth for every page-size question: RecomputeLayout,
+    // ComputePageSize, drag targeting and the settings preview all flow
+    // through GridDimsFor so they can never disagree again.
+    private double GridCellWidth => TileWidth + 16;
+    private double GridCellHeight => TileIconSize + 52;
+
+    private static (int Cols, int Rows) GridDimsFor(double width, double height, double cellW, double cellH)
+    {
+        var cols = Math.Max(1, (int)(width / cellW));
+        var rows = Math.Max(1, (int)(height / cellH));
+        return (cols, rows);
+    }
+
     private void RecomputeLayout()
     {
         if (AppsList is null)
@@ -565,8 +613,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (width < 100 || height < 100)
             return;
 
-        var cols = Math.Max(1, (int)(width / (TileWidth + 16)));
-        var rows = Math.Max(1, (int)(height / (TileIconSize + 52)));
+        var (cols, rows) = GridDimsFor(width, height, GridCellWidth, GridCellHeight);
         var newPageSize = cols * rows;
         if (newPageSize == _pageSize)
             return;
@@ -599,7 +646,7 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         if (_openGroup is not null || SettingsOverlay.Visibility == Visibility.Visible)
             return; // let inner lists/sliders handle their own scrolling
-                    if (e.Delta < 0)
+        if (e.Delta < 0)
             NextPage();
         else if (e.Delta > 0)
             PreviousPage();
@@ -607,14 +654,19 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // ── Page sizing ─────────────────────────────────────────────────
+    // Unified with RecomputeLayout: measured AppsList size wins, otherwise
+    // fall back to the window size minus the known chrome (search + status).
     private int ComputePageSize()
     {
-        // Based on the live tile size: columns across the window / rows / 2 (label space).
-        var availWidth = ActualWidth - 80; // margins
-        var cols = Math.Max(1, (int)(availWidth / (TileWidth + 24)));
-        var availHeight = ActualHeight - 160; // search + status
-        var rows = Math.Max(1, (int)(availHeight / (TileWidth + 40)));
-        return cols * rows;
+        if (AppsList is not null && AppsList.ActualWidth >= 100 && AppsList.ActualHeight >= 100)
+        {
+            var (cols, rows) = GridDimsFor(AppsList.ActualWidth, AppsList.ActualHeight, GridCellWidth, GridCellHeight);
+            return Math.Max(1, cols * rows);
+        }
+        var fallbackW = Math.Max(100, ActualWidth - 80); // AppsList side margins
+        var fallbackH = Math.Max(100, ActualHeight - 160); // search + status rows
+        var (fcols, frows) = GridDimsFor(fallbackW, fallbackH, GridCellWidth, GridCellHeight);
+        return Math.Max(1, fcols * frows);
     }
 
     private void StartHoldTimer()
@@ -637,8 +689,6 @@ public partial class MainWindow : INotifyPropertyChanged
         _holdTimer?.Stop();
         _holdTimer = null;
     }
-    private int ComputePageCount(int count) =>
-        Math.Max(1, (int)Math.Ceiling(count / (double)(ComputePageSize())));
 
     // ── Gesture / positioning helpers ─────────────────────────────
     private bool IsWithinSearch(DependencyObject? source)
@@ -649,7 +699,6 @@ public partial class MainWindow : INotifyPropertyChanged
         return false;
     }
 
-    /// <summary>
     /// <summary>
     /// Checks whether the click landed on the settings gear button.
     /// </summary>
@@ -775,81 +824,10 @@ public partial class MainWindow : INotifyPropertyChanged
         return null;
     }
 
-    // ── Drag / drop: creates groups, adds to group, reorders, drag-out ─
-    private void OnDragEnter(object sender, System.Windows.DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent("Tile"))
-            return;
-        var tile = e.Data.GetData("Tile") as AppRow;
-        if (tile is null)
-            return;
-
-        if (SettingsOverlay.Visibility == Visibility.Visible)
-            return;
-
-        e.Effects = System.Windows.DragDropEffects.Move;
-        e.Handled = true;
-    }
-
-    private void OnDragOver(object sender, System.Windows.DragEventArgs e)
-    {
-        if (SettingsOverlay.Visibility == Visibility.Visible)
-            return;
-        if (!e.Data.GetDataPresent("Tile"))
-            return;
-
-        e.Effects = System.Windows.DragDropEffects.Move;
-        e.Handled = true;
-    }
-
-    private void OnDrop(object sender, System.Windows.DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent("Tile"))
-            return;
-        var dragged = e.Data.GetData("Tile") as AppRow;
-        if (dragged is null)
-            return;
-
-        // Group target: drop onto a group tile or onto the open group window.
-        if (FindGroupFromSender(sender) is { } targetGroup)
-        {
-            AddToGroup(targetGroup, dragged);
-            return;
-        }
-
-        // Open-group window: drop on the members area = add to group.
-        if (_openGroup is not null && FindMemberContainer(e.OriginalSource as DependencyObject) is not null)
-        {
-            AddToGroup(_openGroup, dragged);
-            return;
-        }
-
-        // Drag-out from a group: drop back on the main grid = remove from group.
-        if (_tileDragFromGroup && FindTileContainer(e.OriginalSource as DependencyObject) is { } container)
-        {
-            if (_openGroup is not null && dragged == _dragTile)
-                RemoveFromGroup(dragged);
-            else
-                TryReorder(dragged, container);
-            return;
-        }
-
-        // Main-grid drop on a tile: create/add group.
-        if (FindTileContainer(e.OriginalSource as DependencyObject) is { } targetContainer
-            && targetContainer.DataContext is AppRow targetTile && targetTile != dragged)
-        {
-            if (_tileDragFromGroup)
-            {
-                AddToGroup(_openGroup!, dragged);
-            }
-            else
-            {
-                CreateGroup(dragged, targetTile);
-            }
-            return;
-        }
-    }
-
+    // ── Tile drag (custom mouse ghost + placeholder): creates groups,
+    // adds to group, reorders, drag-out. NOTE: there is intentionally no
+    // Ole DragDrop here (no DoDragDrop / OnDrop) — the ghost follows the
+    // cursor in OnMouseMove and the drop lands in OnMouseLeftButtonUp.
     private void CreateGroup(AppRow a, AppRow b)
     {
         var group = new AppGroup
@@ -898,31 +876,24 @@ public partial class MainWindow : INotifyPropertyChanged
         RefreshAllGroupPreviews();
     }
 
-    private void TryReorder(AppRow tile, ListBoxItem targetContainer)
+    // ── Launching ─────────────────────────────────────────────────
+    // Enter / single-click. Groups open instead of launch.
+    // Guarded: a fast double-click must not start the app twice.
+    private string? _lastLaunchedId;
+    private DateTime _lastLaunchUtc = DateTime.MinValue;
+
+    private bool TryLaunch(AppRow row)
     {
-        // Live reordering within the current page slice: the dropped tile
-        // swaps with the target. For now, swap-with-target (macOS flows all
-        // others, but a swap is enough to reorder).
-        var targetTile = targetContainer.DataContext as ITileRow;
-        if (targetTile is null)
-            return;
-
-        if (_reorderPreview is null)
-            _reorderPreview = new List<ITileRow>(_filtered);
-
-        var from = _reorderPreview.IndexOf(tile);
-        var to = _reorderPreview.IndexOf(targetTile);
-        if (from >= 0 && to >= 0 && from != to)
-        {
-            (_reorderPreview[from], _reorderPreview[to]) = (_reorderPreview[to], _reorderPreview[from]);
-            _reorderPreview.ToList(); // force
-            RenderPage(0);
-            PersistLayout();
-        }
+        var now = DateTime.UtcNow;
+        if (row.App.Id == _lastLaunchedId && (now - _lastLaunchUtc) < TimeSpan.FromSeconds(1.5))
+            return false;
+        _lastLaunchedId = row.App.Id;
+        _lastLaunchUtc = now;
+        Dismiss(); // overlay dismisses once the app opens (macOS behavior)
+        AppLauncher.Launch(row.App);
+        return true;
     }
 
-    // ── Launching ─────────────────────────────────────────────────
-    // Enter / single-click / double-click. Groups open instead of launch.
     private void LaunchSelected()
     {
         var selected = _openGroup is not null
@@ -935,8 +906,7 @@ public partial class MainWindow : INotifyPropertyChanged
         }
         if (selected is AppRow row)
         {
-            Close(); // overlay dismisses once the app opens (macOS behavior)
-            AppLauncher.Launch(row.App);
+            TryLaunch(row);
         }
     }
 
@@ -1030,8 +1000,8 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         if (AppsList.ActualWidth < 100)
             return 0;
-        var cellW = TileWidth + 16;
-        var rowH = TileIconSize + 52;
+        var cellW = GridCellWidth;
+        var rowH = GridCellHeight;
         var cols = Math.Max(1, (int)(AppsList.ActualWidth / cellW));
         var usedW = cols * cellW;
         var leftOffset = Math.Max(0.0, (AppsList.ActualWidth - usedW) / 2);
@@ -1039,8 +1009,9 @@ public partial class MainWindow : INotifyPropertyChanged
         var row = (int)Math.Floor((double)pos.Y / rowH);
         col = Math.Max(0, Math.Min(cols - 1, col));
         row = Math.Max(0, row);
-                var local = Math.Max(0, Math.Min(ComputePageSize() - 1, row * cols + col));
-        return Math.Max(0, Math.Min(_filtered.Count - 1, _pageIndex * ComputePageSize() + local));
+        var pageSize = Math.Max(1, _pageSize);
+        var local = Math.Max(0, Math.Min(pageSize - 1, row * cols + col));
+        return Math.Max(0, Math.Min(_filtered.Count - 1, _pageIndex * pageSize + local));
     }
 
     // Reorders the full list around where the cursor is and re-renders, with
@@ -1101,6 +1072,9 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // ── Jiggle (uninstall) mode ───────────────────────────────────
+    // Badge visibility IS the mode — no tile rotation animation: AppsList
+    // carries a TranslateTransform (PageSlide), so animating
+    // RotateTransform.AngleProperty on it was a silent no-op.
     private void EnterJiggle()
     {
         _jiggleMode = true;
@@ -1109,7 +1083,6 @@ public partial class MainWindow : INotifyPropertyChanged
             row.ShowUninstallBadge = true;
         foreach (var gr in _groupRows)
             gr.ShowRemoveBadge = true;
-        AnimateJiggle();
     }
 
     private void ExitJiggle()
@@ -1119,20 +1092,8 @@ public partial class MainWindow : INotifyPropertyChanged
             row.ShowUninstallBadge = false;
         foreach (var gr in _groupRows)
             gr.ShowRemoveBadge = false;
-        AppsList.BeginAnimation(RotateTransform.AngleProperty, null);
     }
 
-    private void AnimateJiggle()
-    {
-        AppsList.BeginAnimation(RotateTransform.AngleProperty, null);
-        AppsList.BeginAnimation(RotateTransform.AngleProperty,
-            new DoubleAnimation(-6, 0, TimeSpan.FromMilliseconds(500))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
-            });
-    }
-
-    private void LaunchAppsListDoubleClick(object sender, MouseButtonEventArgs e) => LaunchSelected();
     // ── Drag: mouse-move (ghost + swipe flip) ─────────────────────
     private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
@@ -1269,8 +1230,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (FindMemberContainer(clickSource) is { } member
             && member.DataContext is AppRow groupApp)
         {
-            AppLauncher.Launch(groupApp.App);
-            Close();
+            TryLaunch(groupApp);
             return;
         }
 
@@ -1280,20 +1240,21 @@ public partial class MainWindow : INotifyPropertyChanged
                 OpenGroup(g);
             else if (container.DataContext is AppRow app)
             {
-                AppLauncher.Launch(app.App);
-                Close();
+                TryLaunch(app);
                 return;
             }
         }
 
         // Click on empty area (outside tiles, search, and controls) → close.
-        Close();
+        Dismiss();
     }
     // ── Global hotkey: native polling (robust, no window hook) ────
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vk);
 
     private static bool KeyState(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+    private static bool WinKeyState() => KeyState(VkWinLeft) || KeyState(VkWinRight);
 
     private void StartHotKeyPoller()
     {
@@ -1323,10 +1284,10 @@ public partial class MainWindow : INotifyPropertyChanged
         return KeyState(VkControl) == wantCtrl
             && KeyState(VkAlt) == wantAlt
             && KeyState(VkShift) == wantShift
-            && KeyState(VkWin) == wantWin;
+            && WinKeyState() == wantWin;
     }
 
-    // Parses "Ctrl+Alt+L"/"Alt+Space"... into Windows modal flags + VK.
+    // Parses "Ctrl+Alt+L"/"Alt+Space"/"Ctrl+Shift+F12"... into modal flags + VK.
     private static bool ParseHotKey(string spec, ref int mods, ref int vk)
     {
         mods = 0;
@@ -1341,9 +1302,16 @@ public partial class MainWindow : INotifyPropertyChanged
                 case "shift": mods |= 0x0004; break;
                 case "win": mods |= 0x0008; break;
                 case "space": vk = 0x20; break;
+                case "enter": vk = 0x0D; break;
                 default:
                     if (p.Length == 1 && char.IsLetterOrDigit(p[0]))
+                    {
                         vk = char.ToUpperInvariant(p[0]);
+                    }
+                    else if (p.Length >= 2 && p[0] == 'f' && int.TryParse(p[1..], out var f) && f >= 1 && f <= 24)
+                    {
+                        vk = 0x6F + f; // VK_F1 = 0x70
+                    }
                     break;
             }
         }
@@ -1392,10 +1360,11 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         if (GridSizeLabel is null)
             return;
-        var tileW = Math.Round(168 * scale);
-        var tileH = Math.Round(112 * scale);
-        var cols = Math.Max(1, (int)((ActualWidth - 80) / (tileW + 16)));
-        var rows = Math.Max(1, (int)((ActualHeight - 200) / (tileH + 52)));
+        var cellW = Math.Round(168 * scale) + 16;
+        var cellH = Math.Round(112 * scale) + 52;
+        var fallbackW = Math.Max(100, ActualWidth - 80);
+        var fallbackH = Math.Max(100, ActualHeight - 200);
+        var (cols, rows) = GridDimsFor(fallbackW, fallbackH, cellW, cellH);
         GridSizeLabel.Text = $"{cols} × {rows}";
     }
 
@@ -1407,14 +1376,23 @@ public partial class MainWindow : INotifyPropertyChanged
         var target = contextMenu?.PlacementTarget as FrameworkElement;
         if (target?.DataContext is AppRow row)
         {
-            var path = row.App.TargetPath;
             if (row.App.Kind == AppKind.Uwp)
                 return;
+            // Shortcuts: open the resolved exe folder (what the user expects),
+            // falling back to the .lnk folder when resolution fails.
+            var path = row.App.TargetPath;
+            if (row.App.Kind == AppKind.Shortcut)
+            {
+                var resolved = LaunchpadClone.Core.Native.StaRunner
+                    .RunSilent(() => LaunchpadClone.Core.Native.ShellLinkResolver.Resolve(path));
+                if (!string.IsNullOrWhiteSpace(resolved?.TargetPath) && File.Exists(resolved.TargetPath))
+                    path = resolved.TargetPath;
+            }
             var folder = Path.GetDirectoryName(path);
             if (folder is not null && Directory.Exists(folder))
             {
                 Process.Start(new ProcessStartInfo("explorer.exe", $"select,\"{path}\"") { UseShellExecute = true });
-                Close(); // close the launcher so the folder is frontmost
+                Dismiss(); // close the launcher so the folder is frontmost
             }
         }
     }
@@ -1427,7 +1405,8 @@ public partial class MainWindow : INotifyPropertyChanged
         var keyLabel = HotKeyLabel(e.Key);
         if (keyLabel.Length == 0)
             return;
-        _pendingHotKey = (KeyState(VkControl) ? "Ctrl+" : "") + (KeyState(VkAlt) ? "Alt+" : "") + keyLabel;
+        _pendingHotKey = (KeyState(VkControl) ? "Ctrl+" : "") + (KeyState(VkAlt) ? "Alt+" : "")
+            + (KeyState(VkShift) ? "Shift+" : "") + (WinKeyState() ? "Win+" : "") + keyLabel;
         HotKeyBox.Text = _pendingHotKey;
     }
 
@@ -1455,6 +1434,7 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         Key.Enter => "Enter",
         Key.Space => "Space",
+        _ when key >= Key.F1 && key <= Key.F24 => key.ToString(),
         _ when key.ToString().Length == 1 => key.ToString(),
         _ => ""
     };
@@ -1480,7 +1460,7 @@ public partial class MainWindow : INotifyPropertyChanged
             else if (SearchBox.Text.Length > 0)
                 SearchBox.Text = "";
             else
-                Close();
+                Dismiss();
             e.Handled = true;
             return;
         }
@@ -1522,70 +1502,170 @@ public partial class MainWindow : INotifyPropertyChanged
     /// <summary>
     /// Extracts icons only for the currently visible page — keeps startup fast.
     /// Scrolling to another page triggers extraction for that page via
-    /// RenderPage → ExtractVisibleIconsAsync.
+    /// RenderPage → ExtractVisibleIconsAsync. Overlapping runs are cancelled
+    /// so fast page flips cannot corrupt the shared icon cache.
     /// </summary>
     private async Task ExtractVisibleIconsAsync()
     {
+        // Cancel any in-flight run started by a previous page flip.
+        _iconCts?.Cancel();
+        _iconCts?.Dispose();
+        _iconCts = new CancellationTokenSource();
+        var ct = _iconCts.Token;
+
         // Snapshot only the rows on the current page (not the entire list).
-        var pageSize = Math.Max(1, _pageSize);
-        var pageStart = _pageIndex * pageSize;
-        var visibleRows = _filtered
-            .OfType<AppRow>()
-            .Skip(pageStart)
-            .Take(pageSize)
-            .Where(r => r.Icon is null)
-            .ToList();
+        // Must run on the UI thread: _filtered / _rows are UI-owned.
+        List<AppRow> visibleRows;
+        if (!Dispatcher.CheckAccess())
+            visibleRows = await Dispatcher.InvokeAsync(() => SnapshotVisibleRows());
+        else
+            visibleRows = SnapshotVisibleRows();
 
         var updatedApps = false;
         foreach (var row in visibleRows)
         {
-            var path = await _icons.ExtractAndCacheAsync(row.App);
+            if (ct.IsCancellationRequested)
+                return;
+            string? path;
+            try
+            {
+                path = await _icons.ExtractAndCacheAsync(row.App, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
             if (path is null)
                 continue;
+
+            // BitmapImage must be frozen so it can cross threads safely.
             var source = new BitmapImage();
             source.BeginInit();
             source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
             source.DecodePixelWidth = 128;
             source.CacheOption = BitmapCacheOption.OnLoad;
             source.EndInit();
-            _iconMemoryCache[row.App.Id] = source;
-            if (_rowsById.TryGetValue(row.App.Id, out var current))
-                current.Icon = source;
+            source.Freeze();
 
-            // Persist the icon cache path so next startup skips re-extraction.
-            if (row.App.IconCachePath != path)
+            lock (_iconLock)
             {
-                row.Update(row.App.WithIconCachePath(path));
-                updatedApps = true;
+                _iconMemoryCache[row.App.Id] = source;
             }
+
+            // Row updates must happen on the UI thread.
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_rowsById.TryGetValue(row.App.Id, out var current))
+                    current.Icon = source;
+
+                // Persist the icon cache path so next startup skips re-extraction.
+                if (row.App.IconCachePath != path)
+                {
+                    row.Update(row.App.WithIconCachePath(path));
+                    SyncAllAppsIconPath(row.App.Id, path);
+                    updatedApps = true;
+                }
+            });
+
+            if (ct.IsCancellationRequested)
+                return;
         }
-        Dispatcher.Invoke(() => RefreshAllGroupPreviews());
+
+        await Dispatcher.InvokeAsync(RefreshAllGroupPreviews);
 
         // Re-save the app list cache now that icon paths are filled in.
-        if (updatedApps)
-            await _cache.SaveAsync(_allApps);
+        if (updatedApps && !ct.IsCancellationRequested)
+        {
+            List<AppItem> snapshot;
+            lock (_iconLock)
+            {
+                snapshot = _allApps.ToList();
+            }
+            await _cache.SaveAsync(snapshot);
+        }
+    }
+
+    private List<AppRow> SnapshotVisibleRows()
+    {
+        var pageSize = Math.Max(1, _pageSize);
+        var pageStart = _pageIndex * pageSize;
+        return _filtered
+            .OfType<AppRow>()
+            .Skip(pageStart)
+            .Take(pageSize)
+            .Where(r => r.Icon is null)
+            .ToList();
+    }
+
+    private void SyncAllAppsIconPath(string id, string path)
+    {
+        for (var i = 0; i < _allApps.Count; i++)
+        {
+            if (_allApps[i].Id == id && _allApps[i].IconCachePath != path)
+                _allApps[i] = _allApps[i].WithIconCachePath(path);
+        }
     }
 
     // ── Watcher deltas (shortcut install/uninstall) ──────────────
     private async Task OnWatcherUpserted(IReadOnlyList<AppItem> items)
     {
+        // AppWatcher fires on a thread-pool timer thread — marshal all
+        // ObservableCollection / Dictionary mutations to the UI thread.
+        if (!Dispatcher.CheckAccess())
+        {
+            await Dispatcher.InvokeAsync(() => OnWatcherUpserted(items));
+            return;
+        }
+
         foreach (var app in items)
         {
             if (_rowsById.TryGetValue(app.Id, out var existing))
+            {
                 existing.Update(app);
+                SyncAllAppsItem(app);
+            }
             else
             {
                 var row = new AppRow(app);
+                lock (_iconLock)
+                {
+                    if (_iconMemoryCache.TryGetValue(app.Id, out var icon))
+                        row.Icon = icon;
+                }
                 _rows.Add(row);
                 _rowsById[app.Id] = row;
+                _allApps.Add(app);
             }
         }
-        Dispatcher.Invoke(() => RefreshAllGroupPreviews());
+        RefreshAllGroupPreviews();
+        ApplyFilter(true);
         _ = ExtractVisibleIconsAsync();
+        await Task.CompletedTask;
+    }
+
+    private void SyncAllAppsItem(AppItem app)
+    {
+        for (var i = 0; i < _allApps.Count; i++)
+        {
+            if (_allApps[i].Id == app.Id)
+            {
+                // Keep the cached icon path — watcher items carry none.
+                var iconPath = _allApps[i].IconCachePath ?? app.IconCachePath;
+                _allApps[i] = iconPath is not null ? app.WithIconCachePath(iconPath) : app;
+                return;
+            }
+        }
     }
 
     private async Task OnWatcherRemoved(IReadOnlyList<string> ids)
     {
+        // Same marshalling as above — _rows is UI-owned.
+        if (!Dispatcher.CheckAccess())
+        {
+            await Dispatcher.InvokeAsync(() => OnWatcherRemoved(ids));
+            return;
+        }
+
         foreach (var id in ids)
         {
             if (_rowsById.TryGetValue(id, out var row))
@@ -1593,7 +1673,10 @@ public partial class MainWindow : INotifyPropertyChanged
                 _rows.Remove(row);
                 _rowsById.Remove(id);
             }
+            _allApps.RemoveAll(a => a.Id == id);
         }
-        Dispatcher.Invoke(() => RefreshAllGroupPreviews());
+        RefreshAllGroupPreviews();
+        ApplyFilter(true);
+        await Task.CompletedTask;
     }
 }

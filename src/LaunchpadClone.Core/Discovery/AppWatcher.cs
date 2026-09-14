@@ -18,6 +18,7 @@ public sealed class AppWatcher : IDisposable
     private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private readonly Timer _timer;
+    private readonly SemaphoreSlim _batchGate = new(1, 1);
     private bool _disposed;
 
     /// <summary>Created or modified shortcuts, re-resolved and ready to upsert.</summary>
@@ -101,7 +102,13 @@ public sealed class AppWatcher : IDisposable
 
     private async Task ProcessBatchAsync(List<string> batch)
     {
-        var upserted = new List<AppItem>();
+        // Serialize batches: the debounce timer can fire again while a slow
+        // batch is still resolving shortcuts — overlapping runs would
+        // interleave upserts/removes out of order.
+        await _batchGate.WaitAsync();
+        try
+        {
+            var upserted = new List<AppItem>();
         var removedIds = new List<string>();
 
         foreach (var path in batch.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -145,6 +152,11 @@ public sealed class AppWatcher : IDisposable
         catch (Exception)
         {
         }
+        }
+        finally
+        {
+            _batchGate.Release();
+        }
     }
 
     public void Dispose()
@@ -157,6 +169,7 @@ public sealed class AppWatcher : IDisposable
         }
 
         _timer.Dispose();
+        _batchGate.Dispose();
         foreach (var watcher in _watchers)
             watcher.Dispose();
         _watchers.Clear();

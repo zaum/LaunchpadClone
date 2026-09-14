@@ -54,6 +54,9 @@ public sealed class TileLayoutStore
     public async Task SaveAsync(IReadOnlyList<string> orderedIds, CancellationToken ct = default)
     {
         var envelope = new LayoutEnvelope(CurrentVersion, orderedIds.ToList(), DateTime.UtcNow);
+        var dir = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
         var tmpPath = _filePath + ".tmp";
         await using (var stream = File.Create(tmpPath))
         {

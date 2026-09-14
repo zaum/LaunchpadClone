@@ -70,6 +70,9 @@ public sealed class AppSettingsStore
 
     public async Task SaveAsync(AppSettings settings, CancellationToken ct = default)
     {
+        var dir = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
         var tmpPath = _filePath + ".tmp";
         await using (var stream = File.Create(tmpPath))
         {
