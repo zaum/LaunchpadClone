@@ -32,3 +32,6 @@ Beginner-friendly tone: explain jargon, add context. Code comments/README stay t
 - Global open-hotkey is polled via user32 GetAsyncKeyState (no window hook).
 - Reorder drops slot the tile by pixel position and persist; per-index reflow while
   dragging is live via a placeholder cell (macOS "others flow around").
+
+## Dev loop
+- When testing/developing the UI: kill ALL running LaunchpadClone.UI.exe instances before rebuilding, then start exactly ONE fresh instance after a successful build (the exe locks its own DLLs, stale copies cause MSB3026/MSB3027 copy errors).

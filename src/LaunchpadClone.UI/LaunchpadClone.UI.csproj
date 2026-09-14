@@ -16,4 +16,10 @@
     <ProjectReference Include="..\LaunchpadClone.Core\LaunchpadClone.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Fluent (Windows 11) design system for WPF: styled controls, Mica
+         backdrop, dark theme resources. -->
+    <PackageReference Include="WPF-UI" Version="3.0.5" />
+  </ItemGroup>
+
 </Project>
