@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 14
+* **Total commits:** 15
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -13,7 +13,7 @@
 * Instant icon startup: cached icon PNGs are decoded synchronously in `RenderApps`, so tiles never paint empty while the async extraction warms up (previously every launch showed blank tiles until extraction caught up).
 * Verified settings persistence end-to-end: grid size (`tileScale`), hotkey, and hot-corner choices save to `launchpad-settings.json` immediately on change and reload at startup.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `8e4c8bd`
 
 ---
 
