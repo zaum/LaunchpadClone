@@ -179,6 +179,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
     // Tile-drag state (group create/add, reorder, drag-out).
     private AppRow? _dragTile;
+    private GroupRow? _dragGroupTile;
     private bool _tileDragArmed;
     private bool _tileDragFromGroup;
     private System.Windows.Point _tileDragStart;
@@ -857,12 +858,22 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         }
 
-        if (FindTileContainer(e.OriginalSource as DependencyObject) is { } container
-            && container.DataContext is AppRow tile)
+        // Any tile (app OR folder) can be dragged: apps create/enter groups,
+        // folders reorder like any other tile (macOS Launchpad behavior).
+        if (FindTileContainer(e.OriginalSource as DependencyObject) is { } container)
         {
-            _dragTile = tile;
-            _tileDragArmed = false;
-            _tileDragFromGroup = false;
+            if (container.DataContext is AppRow tile)
+            {
+                _dragTile = tile;
+                _tileDragArmed = false;
+                _tileDragFromGroup = false;
+            }
+            else if (container.DataContext is GroupRow groupTile)
+            {
+                _dragGroupTile = groupTile;
+                _tileDragArmed = false;
+                _tileDragFromGroup = false;
+            }
         }
     }
 
@@ -1140,14 +1151,16 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void ReorderTiles()
     {
-        if (_reorderPreview is not null && _dragTile is not null)
+        if (_reorderPreview is not null && AnyDragTile is not null)
         {
-            _dragTile.ShowAsPlaceholder = false;
+            if (_dragTile is not null)
+                _dragTile.ShowAsPlaceholder = false;
             _filtered = _reorderPreview.ToList();
         }
         _reorderPreview = null;
         _dragTargetIndex = -1;
         _dragTile = null;
+        _dragGroupTile = null;
         PersistLayout();
         RenderPage(0);
     }
@@ -1176,15 +1189,16 @@ public partial class MainWindow : INotifyPropertyChanged
     // the dragged tile drawn as an empty slot so the rest "flow around" it.
     private void BuildReorderPreview()
     {
-        if (_dragTile is null)
+        if (AnyDragTile is not { } dragged)
             return;
-        var idx = _filtered.IndexOf(_dragTile);
+        var idx = _filtered.IndexOf(dragged);
         if (idx < 0)
             return;
-        _dragTile.ShowAsPlaceholder = true;
+        if (dragged is AppRow appRow)
+            appRow.ShowAsPlaceholder = true;
         var preview = _filtered.ToList();
         preview.RemoveAt(idx);
-        preview.Insert(Math.Max(0, Math.Min(preview.Count, _dragTargetIndex)), _dragTile);
+        preview.Insert(Math.Max(0, Math.Min(preview.Count, _dragTargetIndex)), dragged);
         _reorderPreview = preview;
         RenderPageGlide();
     }
@@ -1247,6 +1261,17 @@ public partial class MainWindow : INotifyPropertyChanged
                     ar.ShowAsPlaceholder = false;
         _reorderPreview = null;
         _dragTargetIndex = -1;
+    }
+
+    // Drops every piece of drag state — used by Esc-cancel and mouse-up paths.
+    private void ResetDragState()
+    {
+        ClearDragPreview();
+        _dragTile = null;
+        _dragGroupTile = null;
+        _tileDragArmed = false;
+        _tileDragFromGroup = false;
+        DragGhost.Visibility = Visibility.Collapsed;
     }
 
     // ── Badge buttons (clicks) ────────────────────────────────────
@@ -1321,7 +1346,7 @@ public partial class MainWindow : INotifyPropertyChanged
             StopHoldTimer();
 
         // Page flip by horizontal swipe on empty space (not while moving a tile).
-        if (_dragTile is null && _dragOrigin is { } og && !_dragConsumed)
+        if (_dragTile is null && _dragGroupTile is null && _dragOrigin is { } og && !_dragConsumed)
         {
             var pos = e.GetPosition(this);
             var dx = pos.X - og.X;
@@ -1338,7 +1363,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
         // Tile drag: show the ghost once the pointer moves 14px, follow it,
         // and flip the page when dragged against an edge (macOS rearrange).
-        if (_dragTile is not null)
+        if (AnyDragTile is not null)
         {
             var pos = e.GetPosition(this);
             if (!_tileDragArmed)
@@ -1352,17 +1377,19 @@ public partial class MainWindow : INotifyPropertyChanged
             }
             if (DragGhost.Visibility != Visibility.Visible)
             {
-                DragGhostImage.Source = _dragTile.Icon;
+                DragGhostImage.Source = _dragTile?.Icon ?? MakeGroupGhostImage(_dragGroupTile);
                 DragGhost.Visibility = Visibility.Visible;
                 DragGhost.UpdateLayout(); // ActualWidth/Height needed below
                 // macOS-style pickup pop: the ghost springs up from 70%.
+                // Setting the start value BEFORE BeginAnimation keeps the
+                // transform identity at frame zero (no visible stall).
+                DragGhostScale.ScaleX = 0.7;
+                DragGhostScale.ScaleY = 0.7;
                 var pop = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
                 DragGhostScale.BeginAnimation(ScaleTransform.ScaleXProperty,
                     new DoubleAnimation(1, TimeSpan.FromMilliseconds(220)) { EasingFunction = pop });
                 DragGhostScale.BeginAnimation(ScaleTransform.ScaleYProperty,
                     new DoubleAnimation(1, TimeSpan.FromMilliseconds(220)) { EasingFunction = pop });
-                DragGhostScale.ScaleX = 0.7;
-                DragGhostScale.ScaleY = 0.7;
             }
             // Center the ghost under the cursor via its TranslateTransform:
             // render-only, so the per-frame move never triggers a layout pass
@@ -1383,11 +1410,15 @@ public partial class MainWindow : INotifyPropertyChanged
             // re-render + FLIP pass costs milliseconds — without throttling
             // the queue saturates and the drag feels laggy (input backlog).
             // Hovering a tile center freezes the preview anyway (group aim).
+            // The placeholder only replaces the dragged tile once the cursor
+            // actually leaves its home cell — before that, the grid jumping
+            // while the icon is still picked up felt like a hard stutter.
             if (!IsHoveringTileCenter(gridPos))
             {
                 var target = ComputeDragTargetIndex(gridPos);
                 var now = Environment.TickCount64;
-                if (target != _dragTargetIndex && now - _lastReorderMs >= 50)
+                var home = _filtered.IndexOf(AnyDragTile);
+                if (target != _dragTargetIndex && target != home && now - _lastReorderMs >= 50)
                 {
                     _lastReorderMs = now;
                     _dragTargetIndex = target;
@@ -1396,7 +1427,8 @@ public partial class MainWindow : INotifyPropertyChanged
             }
                 // Hover-to-group: resting the ghost on another tile for a
                 // moment folds them into a group (no drop needed).
-                UpdateHoverGroupTimer(gridPos);
+                if (_dragTile is not null)
+                    UpdateHoverGroupTimer(gridPos);
             }
 
             var edgePos = e.GetPosition(AppsList);
@@ -1465,6 +1497,14 @@ public partial class MainWindow : INotifyPropertyChanged
         _hoverGroupTimer.Start();
     }
 
+    // The tile being dragged, whether it is an app or a whole folder.
+    private ITileRow? AnyDragTile => (ITileRow?)_dragTile ?? _dragGroupTile;
+
+    // Folders have no single icon: their drag ghost shows the first preview
+    // icon (the same one the tile shows top-left).
+    private static ImageSource? MakeGroupGhostImage(GroupRow? group)
+        => group?.Previews.FirstOrDefault(p => p is not null);
+
     private void StopHoverGroupTimer()
     {
         _hoverGroupTimer?.Stop();
@@ -1519,7 +1559,7 @@ public partial class MainWindow : INotifyPropertyChanged
             var i = 0;
             foreach (var item in items)
             {
-                if (i == local && item is ITileRow row && !ReferenceEquals(row, _dragTile))
+                if (i == local && item is ITileRow row && !ReferenceEquals(row, AnyDragTile))
                     return row;
                 i++;
             }
@@ -1568,34 +1608,42 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         }
 
-        if (_tileDragArmed && _dragTile is not null)
+        if (_tileDragArmed && AnyDragTile is not null)
         {
             var source = _dragTile;
+            var sourceGroup = _dragGroupTile;
             var fromGroup = _tileDragFromGroup;
             _tileDragArmed = false;
             _tileDragFromGroup = false;
             DragGhost.Visibility = Visibility.Collapsed;
 
-            // Dragged out of an open group → remove that member.
-            if (fromGroup && _openGroup is { } og && og.Group.MemberIds.Contains(source.App.Id))
+            // Dragged a whole folder → it only reorders (like macOS: folders
+            // never nest and cannot be dropped INTO another folder).
+            if (sourceGroup is not null)
             {
-                ClearDragPreview();
-                _dragTile = null;
+                ReorderTiles();
+                return;
+            }
+
+            // Dragged out of an open group → remove that member.
+            if (fromGroup && _openGroup is { } og && source is not null
+                && og.Group.MemberIds.Contains(source.App.Id))
+            {
+                ResetDragState();
                 RemoveFromGroup(source);
                 return;
             }
 
             var targetContainer = FindTileContainer(e.OriginalSource as DependencyObject);
-            if (targetContainer?.DataContext is GroupRow targetGroup)
+            if (source is not null && targetContainer?.DataContext is GroupRow targetGroup)
             {
-                ClearDragPreview();
-                _dragTile = null;
+                ResetDragState();
                 AddToGroup(targetGroup, source);
+                ApplyFilter(true); // the dropped tile disappears into the folder
             }
-            else if (targetContainer?.DataContext is AppRow targetApp && targetApp != source)
+            else if (source is not null && targetContainer?.DataContext is AppRow targetApp && targetApp != source)
             {
-                ClearDragPreview();
-                _dragTile = null;
+                ResetDragState();
                 CreateGroup(source, targetApp);
             }
             else
@@ -1874,15 +1922,11 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
         if (e.Key == Key.Escape)
         {
             // First cancel an in-flight drag; then step out of the overlay stack.
-            if (_tileDragArmed || _dragTile is not null)
+            if (_tileDragArmed || AnyDragTile is not null)
             {
                 StopHoldTimer();
                 StopHoverGroupTimer();
-                ClearDragPreview();
-                _tileDragArmed = false;
-                _tileDragFromGroup = false;
-                _dragTile = null;
-                DragGhost.Visibility = Visibility.Collapsed;
+                ResetDragState();
             }
             else if (SettingsOverlay.Visibility == Visibility.Visible)
                 OnCloseSettings(sender, e);

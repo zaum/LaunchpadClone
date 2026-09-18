@@ -21,8 +21,9 @@ public sealed class AppSettings
     public AppHotCorner HotCorner { get; set; } = AppHotCorner.TopRight;
 
     /// <summary>Tile size multiplier (0.7 compact .. 1.4 roomy) — the grid
-    /// size slider. Applied live; page capacity recomputes from it.</summary>
-    public double TileScale { get; set; } = 1.0;
+    /// size slider. Applied live; page capacity recomputes from it.
+    /// Default is the middle of the slider's practical range.</summary>
+    public double TileScale { get; set; } = 1.05;
 
     /// <summary>Global hotkey that opens the launcher, e.g. "Ctrl+Alt+L".</summary>
     public string HotKey { get; set; } = "Ctrl+Alt+L";

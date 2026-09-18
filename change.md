@@ -6,6 +6,17 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🐛 Fixes · Grouping Restored, Drag Lag Eliminated, Centered Default Grid
+
+* **Grouping fixed end-to-end:** dropping an app onto a folder tile now actually adds it (the dropped app tile correctly disappears into the folder via a re-filter, and the hover-to-group timer can also fold apps into existing folders, not just app+app).
+* **Folders are draggable too:** a folder tile can be picked up and reordered like any app (macOS never nests folders, so a dragged folder only reorders). Previously the mouse-down handler only armed drags for app tiles, so folder drags silently dead-ended.
+* **Drag start no longer stalls:** the reorder preview used to re-render the whole page the moment the drag armed (even before the cursor left the tile's own cell) — now the placeholder only replaces the dragged tile once the cursor actually leaves its home cell, and the ghost pickup animation sets its start value before attaching the animation.
+* **Default grid size is now centered** (`tileScale` 1.05, the middle of the slider range) instead of the compact extreme.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Segoe Fluent Icon System (QuickLook Style)
 
 * Adopted the icon system used by the local QuickLook project: bundled the **Segoe Fluent Icons** font (`Fonts/segfluent.ttf`) so every UI glyph is a genuine Windows 11 icon that renders identically on all machines.
