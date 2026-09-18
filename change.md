@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 18
+* **Total commits:** 19
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -13,7 +13,7 @@
 * **Clicking beside the open folder no longer quits the launcher:** it steps back to the grid view (`CloseGroup`), keeping the app open. The full dismiss only happens from the grid itself.
 * **Folder name commits only on Enter** (and closes back to the grid). Clicking away no longer renames — previously `LostFocus` committed the half-typed name.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `c604d5b`
 
 ---
 
