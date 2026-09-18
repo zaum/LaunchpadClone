@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 20
+* **Total commits:** 21
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -13,7 +13,7 @@
 * **Layout-save safety:** a reorder saved while the search box has text would overwrite the full stored order with the filtered subset, silently losing tile positions — `PersistLayout` now skips saving during a search.
 * Verified on disk that positions and groups persist (`launchpad-layout.json` + `groups.json` contain the `g:` folder ids and drag order).
 
-`Direct Commit` · `pending`
+`Direct Commit` · `706dff1`
 
 ---
 
