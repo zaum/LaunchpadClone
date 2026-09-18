@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 13
+* **Total commits:** 14
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -15,7 +15,7 @@
 * Fixed jittery drag: the ghost no longer moves via `Margin` (which forced a layout pass on every mouse-move) — it now slides on a `TranslateTransform`, with a soft pop animation on pickup.
 * Smoothed the flow-around reorder animation (140 → 220 ms, longer than the 50 ms throttle so motion chains continuously) and made the page flip travel proportional to the grid width with a subtle fade.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `0891a7d`
 
 ---
 
