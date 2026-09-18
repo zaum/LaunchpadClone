@@ -14,6 +14,11 @@
 
             <!-- Accent color shared by selection, dots and settings highlights. -->
             <SolidColorBrush x:Key="AccentBrush" Color="#6C8CFF" />
+
+            <!-- Segoe Fluent Icons (bundled so every machine renders the same
+                 Windows 11 glyphs) — same icon system the QuickLook project uses.
+                 Usage: FontFamily="{StaticResource SegoeFluent}" + Text="&#xE713;" -->
+            <FontFamily x:Key="SegoeFluent">./Fonts/#Segoe Fluent Icons</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -12,6 +12,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Bundled Segoe Fluent Icons font (same set QuickLook uses): real
+         Windows 11 glyphs for settings/search/close chrome. -->
+    <Resource Include="Fonts\segfluent.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The UI consumes Core as-is: discovery, icons, cache, launch, watcher. -->
     <ProjectReference Include="..\LaunchpadClone.Core\LaunchpadClone.Core.csproj" />
   </ItemGroup>

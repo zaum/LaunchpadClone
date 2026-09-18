@@ -15,10 +15,13 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
-        <!-- Shared ✕ badge look; the Button instance picks the color. -->
+        <!-- Shared ✕ badge look; the Button instance picks the color.
+             The glyph is Segoe Fluent "ChromeClose" — same icon font
+             family as the rest of the chrome (QuickLook-style). -->
         <ControlTemplate x:Key="BadgeTemplate" TargetType="Button">
             <Border Background="{TemplateBinding Background}" CornerRadius="11">
-                <TextBlock Text="✕" Foreground="White" FontSize="11"
+                <TextBlock Text="&#xE8BB;" Foreground="White" FontSize="9"
+                           FontFamily="{StaticResource SegoeFluent}"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
         </ControlTemplate>
@@ -155,10 +158,14 @@
                     <DropShadowEffect BlurRadius="20" ShadowDepth="1" Opacity="0.35" />
                 </Border.Effect>
                 <Grid>
-                    <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="16,0,48,0"
+                    <!-- Segoe Fluent Search glyph, macOS-Spotlight style. -->
+                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource SegoeFluent}"
+                               FontSize="15" Foreground="#99FFFFFF" Margin="14,0,0,0"
+                               VerticalAlignment="Center" IsHitTestVisible="False" />
+                    <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="40,0,44,0"
                              Background="Transparent" BorderThickness="0" CaretBrush="#FFFFFF"
                              Foreground="#FFFFFF" VerticalContentAlignment="Center" />
-                    <TextBlock Text="Search" FontSize="15" Margin="20,0,48,0" Foreground="#99FFFFFF"
+                    <TextBlock Text="Search" FontSize="15" Margin="44,0,44,0" Foreground="#99FFFFFF"
                                VerticalAlignment="Center" IsHitTestVisible="False">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -171,9 +178,10 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
-                    <TextBlock x:Name="ClearSearchButton" Text="×" ToolTip="Clear search"
-                               Cursor="Hand" FontSize="18" HorizontalAlignment="Right"
-                               VerticalAlignment="Center" Margin="0,0,12,0" Foreground="#CCFFFFFF"
+                    <TextBlock x:Name="ClearSearchButton" Text="&#xE711;" ToolTip="Clear search"
+                               FontFamily="{StaticResource SegoeFluent}"
+                               Cursor="Hand" FontSize="13" HorizontalAlignment="Right"
+                               VerticalAlignment="Center" Margin="0,0,16,0" Foreground="#CCFFFFFF"
                                MouseLeftButtonUp="OnClearSearch">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -189,19 +197,20 @@
                 </Grid>
             </Border>
 
-                      <!-- Settings gear (top-right corner): a real vector
-                           gear, not the ⚙ text glyph (font-dependent and
-                           renders differently per machine). -->
+                      <!-- Settings gear (top-right corner): Segoe Fluent
+                           Icons Settings glyph — same Windows 11 icon system
+                           the QuickLook project uses. -->
             <Button x:Name="SettingsGearButton" Click="OnOpenSettings" ToolTip="Settings" Cursor="Hand"
                     HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,48,48,0"
                     Width="40" Height="40"
                     Background="Transparent" BorderThickness="0">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Path Fill="#E8E9EE" Stretch="Uniform" Margin="7"
-                                  Data="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
-                        </Grid>
+                        <Border CornerRadius="10" Background="Transparent">
+                            <TextBlock Text="&#xE713;" FontFamily="{StaticResource SegoeFluent}"
+                                       FontSize="20" Foreground="#E8E9EE"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter Property="Background" Value="#1FFFFFFF" />

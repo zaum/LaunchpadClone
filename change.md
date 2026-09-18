@@ -6,6 +6,17 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Segoe Fluent Icon System (QuickLook Style)
+
+* Adopted the icon system used by the local QuickLook project: bundled the **Segoe Fluent Icons** font (`Fonts/segfluent.ttf`) so every UI glyph is a genuine Windows 11 icon that renders identically on all machines.
+* Settings button now uses the Fluent **Settings** glyph (`E713`) instead of a hand-drawn path.
+* Search box gained a **Search** glyph (`E721`) on the left (Spotlight style) and the clear button switched to the Fluent **Cancel** glyph (`E711`).
+* The uninstall/remove badges switched from the `✕` text character to the Fluent **ChromeClose** glyph (`E8BB`) — crisper at small sizes.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Opaque Folder Panel, Vector Gear & Instant Icon Startup
 
 * Made the open-folder card opaque (`#F2262B33`, Fluent "smoke" tone) so member icons no longer fight the busy grid shining through the panel.
