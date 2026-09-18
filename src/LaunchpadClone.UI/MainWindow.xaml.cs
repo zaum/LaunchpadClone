@@ -1061,6 +1061,9 @@ public partial class MainWindow : INotifyPropertyChanged
         foreach (var row in memberRows)
             row.ShowRemoveBadge = true;
         GroupNameBox.Text = gr.Group.Name;
+        // macOS behavior: the folder panel pops up AT the folder tile's spot.
+        if (!reopen)
+            PositionGroupCard(gr);
         if (reopen)
             return; // content refresh only (add/remove member) — no re-zoom
         GroupOverlay.Opacity = 0;
@@ -1070,6 +1073,37 @@ public partial class MainWindow : INotifyPropertyChanged
         // open folder), committed on Enter.
         Dispatcher.BeginInvoke(new Action(() => Keyboard.Focus(GroupNameBox)),
             DispatcherPriority.Input);
+    }
+
+    // Places the folder card near its tile: measured tile center in window
+    // coordinates, clamped so the card (measured after layout) stays on screen.
+    private void PositionGroupCard(GroupRow gr)
+    {
+        GroupCard.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var cardW = Math.Min(GroupCard.MaxWidth, GroupCard.DesiredSize.Width);
+        var cardH = GroupCard.DesiredSize.Height;
+        if (cardW <= 0 || cardH <= 0)
+            return;
+
+        double x, y;
+        if (AppsList.ItemContainerGenerator.ContainerFromItem(gr) is ListBoxItem c)
+        {
+            var p = c.TranslatePoint(
+                new System.Windows.Point(c.ActualWidth / 2, c.ActualHeight / 2), this);
+            x = p.X - cardW / 2;
+            y = p.Y - cardH / 2;
+        }
+        else
+        {
+            // Tile not on the current page (e.g. opened right after creation
+            // from a different page): fall back to the window center.
+            x = (ActualWidth - cardW) / 2;
+            y = (ActualHeight - cardH) / 2;
+        }
+
+        x = Math.Max(24, Math.Min(ActualWidth - cardW - 24, x));
+        y = Math.Max(24, Math.Min(ActualHeight - cardH - 24, y));
+        GroupCard.Margin = new Thickness(x, y, 0, 0);
     }
 
     private void CloseGroup(bool relaunchFilter = true)
@@ -1974,7 +2008,12 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
         }
         if (e.Key == Key.Enter)
         {
-            LaunchSelected();
+            // Enter inside the open folder just closes it back to the grid —
+            // the first visible tile underneath must never auto-launch.
+            if (_openGroup is not null)
+                CloseGroup();
+            else
+                LaunchSelected();
             e.Handled = true;
             return;
         }

@@ -14,7 +14,11 @@ internal static class WindowAccentBlur
 {
     private const int WCA_ACCENT_POLICY = 19;
     private const int ACCENT_DISABLED = 0;
-    private const int ACCENT_ENABLE_BLURBEHIND = 4;
+    // Acrylic host-backdrop (Windows 10 1803+): the DWM samples and blurs the
+    // desktop ONCE per frame in its own compositor — dramatically cheaper
+    // than ACCENT_ENABLE_BLURBEHIND on a fullscreen window that animates a
+    // lot (the legacy blur-behind re-samples and was the visible stutter).
+    private const int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AccentPolicy
@@ -47,7 +51,11 @@ internal static class WindowAccentBlur
 
             var policy = new AccentPolicy
             {
-                AccentState = enabled ? ACCENT_ENABLE_BLURBEHIND : ACCENT_DISABLED
+                AccentState = enabled ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_DISABLED,
+                // ABGR gradient tint for acrylic: ~16% white noise tint keeps
+                // the blur bright; GradientColor MUST be set or acrylic shows
+                // a solid black window.
+                GradientColor = enabled ? 0x20FFFFFFu : 0u
             };
             var policySize = Marshal.SizeOf<AccentPolicy>();
             var policyPtr = Marshal.AllocHGlobal(policySize);

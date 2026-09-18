@@ -22,8 +22,8 @@ public sealed class AppSettings
 
     /// <summary>Tile size multiplier (0.7 compact .. 1.4 roomy) — the grid
     /// size slider. Applied live; page capacity recomputes from it.
-    /// Default is the middle of the slider's practical range.</summary>
-    public double TileScale { get; set; } = 1.05;
+    /// Default is roomy: fewer, larger icons per page (macOS-like).</summary>
+    public double TileScale { get; set; } = 1.2;
 
     /// <summary>Global hotkey that opens the launcher, e.g. "Ctrl+Alt+L".</summary>
     public string HotKey { get; set; } = "Ctrl+Alt+L";

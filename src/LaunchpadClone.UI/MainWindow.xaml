@@ -182,12 +182,12 @@
                 <Grid>
                     <!-- Segoe Fluent Search glyph, macOS-Spotlight style. -->
                     <TextBlock Text="&#xE721;" FontFamily="{StaticResource SegoeFluent}"
-                               FontSize="15" Foreground="#99FFFFFF" Margin="14,0,0,0"
+                               FontSize="15" Foreground="#66FFFFFF" Margin="14,0,0,0"
                                VerticalAlignment="Center" IsHitTestVisible="False" />
                     <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="40,0,44,0"
                              Style="{StaticResource ChromelessTextBox}"
                              Foreground="#FFFFFF" VerticalContentAlignment="Center" />
-                    <TextBlock Text="Search" FontSize="15" Margin="44,0,44,0" Foreground="#99FFFFFF"
+                    <TextBlock Text="Search" FontSize="15" Margin="44,0,44,0" Foreground="#59FFFFFF"
                                VerticalAlignment="Center" IsHitTestVisible="False">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -230,7 +230,7 @@
                     <ControlTemplate TargetType="Button">
                         <Border CornerRadius="10" Background="Transparent">
                             <TextBlock Text="&#xE713;" FontFamily="{StaticResource SegoeFluent}"
-                                       FontSize="20" Foreground="#E8E9EE"
+                                       FontSize="20" Foreground="#8CFFFFFF"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -296,10 +296,13 @@
             <Grid x:Name="GroupOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="20"
                   Background="Transparent" Visibility="Collapsed">
                 <!-- Opaque dark card (Fluent "smoke" acrylic tone): solid, so
-                     member icons never fight the busy grid shining through. -->
+                     member icons never fight the busy grid shining through.
+                     Positioned at the folder tile's screen spot via Margin
+                     (OpenGroup measures the tile) — macOS opens the folder
+                     where you created/clicked it. -->
                 <Border x:Name="GroupCard" Background="#F2262B33" CornerRadius="26"
                         Padding="40,26,40,22" MaxWidth="860"
-                        VerticalAlignment="Center" HorizontalAlignment="Center"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
                         RenderTransformOrigin="0.5,0.5">
                     <Border.Effect>
                         <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.45" />

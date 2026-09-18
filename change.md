@@ -6,6 +6,18 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Folder Pops at Its Tile, Smoother Animations, Roomier Default Grid
+
+* **Folder panel now opens at the grouped tile's spot:** the card is positioned over the folder tile (clamped to the screen) instead of always centering — matching macOS, where the folder materializes where you created/clicked it.
+* **Enter inside an open folder closes it** back to the grid instead of auto-launching the first visible tile.
+* **Stutter fix:** switched the desktop backdrop from legacy blur-behind to acrylic host-backdrop (the DWM samples the desktop once in its compositor instead of re-sampling every animated frame), which was the main source of jank on a fullscreen animating window.
+* **Roomier default grid:** default tile scale raised to 1.2 — fewer, larger icons per page.
+* **Dimmer chrome:** the "Search" placeholder and magnifier glyph plus the settings gear now use quieter, more translucent whites.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Chromeless Text Fields & Polite Folder Dismissal
 
 * **Search box gets real keyboard focus at startup:** a deferred `Focus()` + `Keyboard.Focus()` after window activation (`OnActivated`) — previously the plain call during `Loaded` lost to window activation and typing went nowhere until you clicked.
