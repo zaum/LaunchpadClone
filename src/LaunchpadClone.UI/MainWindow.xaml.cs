@@ -1643,8 +1643,8 @@ public partial class MainWindow : INotifyPropertyChanged
 private void OnOpenAppFolder(object sender, RoutedEventArgs e)
     {
         // ContextMenu is not in the visual tree, so resolve the row via PlacementTarget.
-        var menuItem = sender as MenuItem;
-        var contextMenu = menuItem?.Parent as ContextMenu;
+        var menuItem = sender as System.Windows.Controls.MenuItem;
+        var contextMenu = menuItem?.Parent as System.Windows.Controls.ContextMenu;
         var target = contextMenu?.PlacementTarget as FrameworkElement;
         if (target?.DataContext is AppRow row)
         {

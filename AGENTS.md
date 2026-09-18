@@ -11,8 +11,8 @@ Beginner-friendly tone: explain jargon, add context. Code comments/README stay t
 - Build only `src/` + `tools/`. Never add `files/*.cs` to a csproj.
 
 ## Build
-- Target: `net8.0-windows10.0.19041.0`, `EnableWindowsTargeting=true` (Linux edit safe).
-- Real build/test only on Windows with .NET 8 SDK (`cd tools/LaunchpadClone.Poc && dotnet run`).
+- Target: `net10.0-windows10.0.19041.0`, `EnableWindowsTargeting=true` (Linux edit safe).
+- Real build/test only on Windows with the .NET 10 SDK (`cd tools/LaunchpadClone.Poc && dotnet run`).
 - PATH QUIRK: an x86 `dotnet` (no SDKs) sits first on PATH — build with the
   full path `"C:\Program Files\dotnet\dotnet.exe"` (SDKs 8.0.425 / 10.0.302).
 - Poc verified on this machine: full scan ~9-50 s, discovery + icons + cache working.
