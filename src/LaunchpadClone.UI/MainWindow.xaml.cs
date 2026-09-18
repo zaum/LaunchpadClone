@@ -905,14 +905,15 @@ public partial class MainWindow : INotifyPropertyChanged
             MemberIds = [a.App.Id, b.App.Id]
         };
         _groups.Add(group);
-        // macOS behavior: the folder tile appears where the dragged icon was,
-        // NOT appended alphabetically. Slot "g:<id>" into the saved order at
-        // the source tile's position and drop the two member ids from it.
-        var anchorIndex = _orderIds.IndexOf(a.App.Id);
+        // macOS behavior: the folder appears where the TARGET tile was (b —
+        // the icon you hovered/dropped onto), not where the dragged icon
+        // came from. Slot "g:<id>" into the saved order at the target's
+        // position and drop the two member ids from it.
+        var anchorIndex = _orderIds.IndexOf(b.App.Id);
         if (anchorIndex < 0)
-            anchorIndex = _orderIds.IndexOf(b.App.Id);
+            anchorIndex = _orderIds.IndexOf(a.App.Id);
         if (anchorIndex < 0)
-            anchorIndex = _filtered.IndexOf(a);
+            anchorIndex = _filtered.IndexOf(b);
         if (anchorIndex < 0)
             anchorIndex = _orderIds.Count; // fallback: end
         _orderIds.Remove(a.App.Id);

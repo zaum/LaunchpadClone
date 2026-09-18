@@ -6,6 +6,14 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🐛 Fixes · New Folder Appears at the Target Tile's Spot
+
+* Group creation now anchors the new folder at the **target** tile's position (the icon you hovered onto / dropped over) instead of the dragged icon's origin — matching macOS Launchpad, where the folder materializes exactly under your cursor.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🐛 Fixes · Grouping Restored, Drag Lag Eliminated, Centered Default Grid
 
 * **Grouping fixed end-to-end:** dropping an app onto a folder tile now actually adds it (the dropped app tile correctly disappears into the folder via a re-filter, and the hover-to-group timer can also fold apps into existing folders, not just app+app).
