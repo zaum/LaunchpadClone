@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 21
+* **Total commits:** 22
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -12,7 +12,7 @@
 * **Folder card reliably opens at its tile:** the card was measured while its parent overlay was `Collapsed` (reports zero size), so positioning silently bailed — now the overlay is made visible at zero opacity first, positioned, then animated. Also re-positions on reopen.
 * **Drag-reorder throttle raised 50 → 80 ms** and the fullscreen page-flip opacity fade removed (slide only) — fewer full-page re-renders and no whole-window recomposition while typing/dragging.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `e9dab85`
 
 ---
 
