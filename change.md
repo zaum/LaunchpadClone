@@ -6,6 +6,17 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🛠️ Maintenance · Render-Performance Pass & Layout Safety
+
+* **Removed every per-tile `DropShadowEffect`:** WPF bitmap effects are software-rendered and re-evaluated every animated frame — they were the heaviest remaining cost during drag/reorder glides. Group tiles use `BitmapCache` now (frozen pixel snapshot, GPU-friendly transforms), and the drag ghost lost its shadow for a crisper, cheaper trail.
+* **Icon decode moved off the UI thread:** PNG decode + downscale now runs in `Task.Run` with a frozen result; the UI thread only assigns finished bitmaps — page flips and startup no longer hitch on decode bursts.
+* **Layout-save safety:** a reorder saved while the search box has text would overwrite the full stored order with the filtered subset, silently losing tile positions — `PersistLayout` now skips saving during a search.
+* Verified on disk that positions and groups persist (`launchpad-layout.json` + `groups.json` contain the `g:` folder ids and drag order).
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Folder Pops at Its Tile, Smoother Animations, Roomier Default Grid
 
 * **Folder panel now opens at the grouped tile's spot:** the card is positioned over the folder tile (clamped to the screen) instead of always centering — matching macOS, where the folder materializes where you created/clicked it.

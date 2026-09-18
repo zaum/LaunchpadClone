@@ -506,23 +506,7 @@ public partial class MainWindow : INotifyPropertyChanged
     // Decodes a cached icon PNG off the UI thread's critical path; a corrupt
     // or deleted file just yields no icon (extraction will rebuild it).
     private static ImageSource? TryLoadCachedIcon(string path)
-    {
-        try
-        {
-            var source = new BitmapImage();
-            source.BeginInit();
-            source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
-            source.DecodePixelWidth = 96;
-            source.CacheOption = BitmapCacheOption.OnLoad;
-            source.EndInit();
-            source.Freeze();
-            return source;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+        => DecodeIconFile(path, CancellationToken.None);
 
     // Stable id of a tile in the saved layout order.
     private static string TileId(ITileRow tile) => tile switch
@@ -1204,6 +1188,10 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void PersistLayout()
     {
+        // Never persist a SEARCH-RESULT slice: that would overwrite the full
+        // saved order with a filtered subset and lose tile positions.
+        if (SearchBox.Text.Length > 0)
+            return;
         var ordered = _filtered.Select(TileId).ToList();
         _orderIds = ordered;
         _ = _layoutStore.SaveAsync(ordered);
@@ -2085,16 +2073,13 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
             if (path is null)
                 continue;
 
-            // BitmapImage decode is the single most expensive UI-thread cost at
-            // startup (~ms per icon). Decode small (tiles are ~64-112px) and
-            // cache the decode, not the file bytes.
-            var source = new BitmapImage();
-            source.BeginInit();
-            source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
-            source.DecodePixelWidth = 96;
-            source.CacheOption = BitmapCacheOption.OnLoad;
-            source.EndInit();
-            source.Freeze();
+            // Decode OFF the UI thread (CPU work: PNG decode + scale) and only
+            // hop to the UI thread for the row update — keeps paging and
+            // startup snappy even with a full page of cold icons.
+            var decoded = await Task.Run(() => DecodeIconFile(path, ct));
+            if (decoded is null)
+                continue;
+            var source = decoded;
 
             lock (_iconLock)
             {
@@ -2131,6 +2116,31 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
                 snapshot = _allApps.ToList();
             }
             await _cache.SaveAsync(snapshot);
+        }
+    }
+
+    // Off-thread icon decode: create, scale down, freeze (free-threaded) so
+    // the UI thread only assigns the finished bitmap. Returns null on error.
+    private static ImageSource? DecodeIconFile(string path, CancellationToken ct)
+    {
+        try
+        {
+            var source = new BitmapImage();
+            source.BeginInit();
+            source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
+            source.DecodePixelWidth = 96;
+            source.CacheOption = BitmapCacheOption.OnLoad;
+            source.EndInit();
+            source.Freeze();
+            return source;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

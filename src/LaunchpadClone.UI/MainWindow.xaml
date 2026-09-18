@@ -54,7 +54,8 @@
              moving (no per-frame AA shimmer), HighQuality bitmap scaling
              keeps downscaled icons sharp. -->
         <DataTemplate x:Key="AppTileTemplate">
-            <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}">
+            <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                  CacheMode="BitmapCache">
                 <Grid.ToolTip>
                     <ToolTip>
                         <ToolTip.Template>
@@ -102,10 +103,8 @@
                 <StackPanel>
                     <Border Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                             Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                            CornerRadius="24" Background="#2EFFFFFF" Padding="13">
-                        <Border.Effect>
-                            <DropShadowEffect BlurRadius="14" ShadowDepth="1" Opacity="0.28" />
-                        </Border.Effect>
+                            CornerRadius="24" Background="#2EFFFFFF" Padding="13"
+                            CacheMode="BitmapCache">
                         <UniformGrid Rows="3" Columns="3">
                             <Image Source="{Binding Previews[0]}" Margin="2" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             <Image Source="{Binding Previews[1]}" Margin="2" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -275,11 +274,8 @@
                  the jittery drag), with a soft macOS-style pop on pickup. -->
             <Border x:Name="DragGhost" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Top"
                     IsHitTestVisible="False" Visibility="Collapsed" Panel.ZIndex="30"
-                    Background="#6616171B" CornerRadius="16" Padding="12"
+                    Background="#8816171B" CornerRadius="16" Padding="12"
                     RenderTransformOrigin="0.5,0.5">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.5" />
-                </Border.Effect>
                 <Border.RenderTransform>
                     <TransformGroup>
                         <TranslateTransform x:Name="DragGhostSlide" />
