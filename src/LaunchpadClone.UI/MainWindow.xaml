@@ -77,7 +77,10 @@
                 <StackPanel>
                     <Border Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                             Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                            CornerRadius="22" Background="#33FFFFFF" Padding="12">
+                            CornerRadius="24" Background="#2EFFFFFF" Padding="13">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="14" ShadowDepth="1" Opacity="0.28" />
+                        </Border.Effect>
                         <UniformGrid Rows="3" Columns="3">
                             <Image Source="{Binding Previews[0]}" Margin="2" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             <Image Source="{Binding Previews[1]}" Margin="2" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -107,9 +110,12 @@
         <local:TileTemplateSelector x:Key="TileSelector"
                                     AppTemplate="{StaticResource AppTileTemplate}"
                                     GroupTemplate="{StaticResource GroupTileTemplate}" />
-        <!-- Shared tile container style: hover/selection rounded highlight. -->
+        <!-- Shared tile container style: hover highlight + macOS-style
+             "accept the drop" press effect (named container so a drag
+             hovering over a tile can gently scale it up). -->
         <Style x:Key="TileItemStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="8,12" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -128,8 +134,13 @@
         </Style>
     </Window.Resources>
 
-    <!-- Fullscreen scrim over the (blurred) desktop: macOS-launcher look. -->
-    <Border Background="#9E000000">
+    <!-- Fullscreen scrim over the (blurred) desktop: macOS-launcher look.
+         Two stacked layers: RootScrim (normal) and ScrimDim (extra dim that
+         fades in behind an open folder — macOS dims the backdrop, the folder
+         itself is a lighter rounded panel floating above). -->
+    <Border x:Name="RootScrim" Background="#9E000000">
+        <Grid>
+            <Border x:Name="ScrimDim" Background="#50000000" Opacity="0" IsHitTestVisible="False" />
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -218,37 +229,67 @@
                            HorizontalAlignment="Center" Margin="0,8,0,20"
                            Foreground="#80FFFFFF" FontSize="12" />
             </StackPanel>
-            <!-- Drag ghost for icon drag (grouping / reorder / drag-out). -->
+            <!-- Drag ghost for icon drag (grouping / reorder / drag-out).
+                 The icon slides on a TranslateTransform updated per frame
+                 (Margin moved the layout box every mouse-move — the cause of
+                 the jittery drag), with a soft macOS-style pop on pickup. -->
             <Border x:Name="DragGhost" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Top"
                     IsHitTestVisible="False" Visibility="Collapsed" Panel.ZIndex="30"
-                    Background="#6616171B" CornerRadius="16" Padding="12">
+                    Background="#6616171B" CornerRadius="16" Padding="12"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.5" />
+                </Border.Effect>
+                <Border.RenderTransform>
+                    <TransformGroup>
+                        <TranslateTransform x:Name="DragGhostSlide" />
+                        <ScaleTransform x:Name="DragGhostScale" />
+                    </TransformGroup>
+                </Border.RenderTransform>
                 <Image x:Name="DragGhostImage" Width="64" Height="64" />
             </Border>
 
-            <!-- Open group ("folder") view -->
-            <Border x:Name="GroupOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="20"
-                    Background="#E0000000" Visibility="Collapsed">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <TextBox x:Name="GroupNameBox" Width="360" Height="40" FontSize="18"
-                             TextAlignment="Center" Background="#2EFFFFFF" Foreground="White"
-                             BorderThickness="0" CaretBrush="White"
-                             VerticalContentAlignment="Center" Margin="0,0,0,24" />
-                    <ListBox x:Name="GroupMembers" Background="Transparent" BorderThickness="0"
-                             ItemTemplate="{StaticResource AppTileTemplate}"
-                             ItemContainerStyle="{StaticResource TileItemStyle}"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Hidden">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel HorizontalAlignment="Center" Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                    </ListBox>
-                    <TextBlock Text="click/Enter — launch · drag out — remove · ✕ — remove · Esc — close"
-                               HorizontalAlignment="Center" Margin="0,20,0,0"
-                               Foreground="#80FFFFFF" FontSize="12" />
-                </StackPanel>
-            </Border>
+            <!-- Open group ("folder") view — macOS Launchpad style:
+                 the backdrop stays blurred (an extra dim fades in), and the
+                 folder is a lighter, rounded translucent panel that zooms
+                 open from the folder tile and slides in its member icons. -->
+            <Grid x:Name="GroupOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="20"
+                  Background="Transparent" Visibility="Collapsed">
+                <Border x:Name="GroupCard" Background="#3DFFFFFF" CornerRadius="26"
+                        Padding="40,26,40,22" MaxWidth="860"
+                        VerticalAlignment="Center" HorizontalAlignment="Center"
+                        RenderTransformOrigin="0.5,0.5">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.45" />
+                    </Border.Effect>
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="GroupCardScale" ScaleX="0.86" ScaleY="0.86" />
+                    </Border.RenderTransform>
+                    <StackPanel>
+                        <TextBox x:Name="GroupNameBox" Width="360" Height="40" FontSize="18"
+                                 TextAlignment="Center" Background="Transparent" Foreground="White"
+                                 BorderThickness="0" CaretBrush="White"
+                                 VerticalContentAlignment="Center" Margin="0,0,0,18" />
+                        <ListBox x:Name="GroupMembers" Background="Transparent" BorderThickness="0"
+                                 ItemTemplate="{StaticResource AppTileTemplate}"
+                                 ItemContainerStyle="{StaticResource TileItemStyle}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Hidden">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel HorizontalAlignment="Center" Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.RenderTransform>
+                                <TranslateTransform x:Name="GroupMembersSlide" />
+                            </ListBox.RenderTransform>
+                        </ListBox>
+                        <TextBlock Text="click/Enter — launch · drag out — remove · Esc — close"
+                                   HorizontalAlignment="Center" Margin="0,16,0,0"
+                                   Foreground="#99FFFFFF" FontSize="12" />
+                    </StackPanel>
+                </Border>
+            </Grid>
             <!-- Settings panel (gear / Done to close) -->
             <Border x:Name="SettingsOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="40"
                     Background="#99000000" Visibility="Collapsed">
@@ -328,6 +369,7 @@
                     </StackPanel>
                 </Border>
             </Border>
+        </Grid>
         </Grid>
     </Border>
 </Window>

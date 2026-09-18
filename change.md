@@ -1,8 +1,32 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 12
-* **Date range:** 2026-09-13 – 2026-09-14
+* **Total commits:** 13
+* **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
+
+---
+
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · macOS-Style Folder View & Fluid Drag Animations
+
+* Reworked the open-group view to match macOS Launchpad: instead of a fullscreen dark overlay, the folder now opens as a lighter, rounded translucent card with a soft shadow, while an extra dim layer fades in over the still-blurred backdrop.
+* Added a spring "zoom-open" animation for the folder card (`BackEase` overshoot) with the member icons sliding up into place; closing plays a matching zoom-out/fade.
+* Fixed difficult grouping: the hover dead-zone over a tile was widened from 55% to ~62% of the cell, so the target icon no longer slides away when dragging another icon onto it.
+* Added macOS-style drop feedback: the tile under the drag ghost gently scales up while hovering (and this now also works over existing folder tiles, so hover-to-add folds the app into the folder).
+* Fixed jittery drag: the ghost no longer moves via `Margin` (which forced a layout pass on every mouse-move) — it now slides on a `TranslateTransform`, with a soft pop animation on pickup.
+* Smoothed the flow-around reorder animation (140 → 220 ms, longer than the 50 ms throttle so motion chains continuously) and made the page flip travel proportional to the grid width with a subtle fade.
+
+`Direct Commit` · `pending`
+
+---
+
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🛠️ Maintenance · Migration to .NET 10
+
+* Migrated all three projects (`Core`, `UI`, `Poc`) from `net8.0-windows10.0.19041.0` to `net10.0-windows10.0.19041.0`.
+* Removed the explicit `System.Text.Json` package reference (now provided by the framework).
+* Fixed a type ambiguity between WPF-UI and stock WPF controls by fully qualifying `System.Windows.Controls.MenuItem` / `ContextMenu`.
+* Updated `AGENTS.md` build instructions to reference the .NET 10 SDK.
+
+`Direct Commit` · `a49604c`
 
 ---
 

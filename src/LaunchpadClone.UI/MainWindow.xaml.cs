@@ -192,7 +192,9 @@ public partial class MainWindow : INotifyPropertyChanged
     // Hover-to-group: when the ghost rests over another tile, a timer folds
     // them into a group without needing a drop (macOS hover-create).
     private DispatcherTimer? _hoverGroupTimer;
-    private AppRow? _hoverGroupTarget;
+    private ITileRow? _hoverGroupTarget;
+    // The tile currently pressed by the hovering ghost (drop feedback).
+    private ListBoxItem? _hoverHighlightContainer;
     // Hover-to-group delay — matches macOS Launchpad's ~0.5 s hold before
     // the target tile "compresses" and the folder forms on release.
     private const double HoverGroupDelayMs = 500;
@@ -592,17 +594,22 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
-    // Page flip glides like moving within one wide surface: a single soft
-    // horizontal slide, no fading — the new page drifts in from the side.
+    // Page flip glides like moving within one wide surface: a soft
+    // horizontal slide with a fade, the new page drifting in from the side.
     private void AnimatePage(int direction)
     {
-        const double travel = 180;
+        var travel = Math.Min(360, Math.Max(160, AppsList.ActualWidth * 0.18));
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
         PageSlide.BeginAnimation(TranslateTransform.XProperty, null);
         PageSlide.X = direction * travel;
         PageSlide.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(0, TimeSpan.FromMilliseconds(450)) { EasingFunction = ease });
+            new DoubleAnimation(0, TimeSpan.FromMilliseconds(380)) { EasingFunction = ease });
+
+        AppsList.BeginAnimation(OpacityProperty, null);
+        AppsList.Opacity = 0.4;
+        AppsList.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(320)) { EasingFunction = ease });
     }
 
     // Tile cell footprint must match the template (tile width + 8px side
@@ -974,8 +981,13 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // ── Group (folder) operations ─────────────────────────────────
+    // macOS behavior: the backdrop stays blurred (an extra dim fades in),
+    // the folder is a lighter rounded card that zooms open with a slight
+    // overshoot while its member icons slide up into place.
     private void OpenGroup(GroupRow gr)
     {
+        var reopen = ReferenceEquals(_openGroup, gr)
+            && GroupOverlay.Visibility == Visibility.Visible;
         _openGroup = gr;
         var memberRows = new List<AppRow>();
         foreach (var id in gr.Group.MemberIds)
@@ -986,7 +998,11 @@ public partial class MainWindow : INotifyPropertyChanged
         foreach (var row in memberRows)
             row.ShowRemoveBadge = true;
         GroupNameBox.Text = gr.Group.Name;
+        if (reopen)
+            return; // content refresh only (add/remove member) — no re-zoom
+        GroupOverlay.Opacity = 0;
         GroupOverlay.Visibility = Visibility.Visible;
+        AnimateGroupOpen();
     }
 
     private void CloseGroup(bool relaunchFilter = true)
@@ -995,9 +1011,58 @@ public partial class MainWindow : INotifyPropertyChanged
             foreach (var row in members)
                 row.ShowRemoveBadge = false;
         _openGroup = null;
-        GroupOverlay.Visibility = Visibility.Collapsed;
+        if (GroupOverlay.Visibility == Visibility.Visible)
+            AnimateGroupClose();
         if (relaunchFilter)
             ApplyFilter(true);
+    }
+
+    private void AnimateGroupOpen()
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var spring = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.35 };
+
+        // Dim layer behind the card fades in (the blur itself is the window's).
+        ScrimDim.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(280)) { EasingFunction = ease });
+
+        GroupOverlay.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(260)) { EasingFunction = ease });
+
+        GroupCardScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(320)) { EasingFunction = spring });
+        GroupCardScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(320)) { EasingFunction = spring });
+
+        GroupMembersSlide.BeginAnimation(TranslateTransform.YProperty, null);
+        GroupMembersSlide.Y = 28;
+        GroupMembersSlide.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(0, TimeSpan.FromMilliseconds(360)) { EasingFunction = ease });
+    }
+
+    private void AnimateGroupClose()
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        ScrimDim.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+
+        GroupCardScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.92, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+        GroupCardScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.92, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease };
+        fade.Completed += (_, _) =>
+        {
+            GroupOverlay.Visibility = Visibility.Collapsed;
+            GroupOverlay.BeginAnimation(OpacityProperty, null);
+            GroupOverlay.Opacity = 1;
+            GroupCardScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            GroupCardScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            GroupCardScale.ScaleX = 0.86;
+            GroupCardScale.ScaleY = 0.86;
+        };
+        GroupOverlay.BeginAnimation(OpacityProperty, fade);
     }
 
     private void CommitGroupName()
@@ -1132,8 +1197,10 @@ public partial class MainWindow : INotifyPropertyChanged
                 continue;
             var slide = new System.Windows.Media.TranslateTransform(dx, dy);
             c.RenderTransform = slide;
-            var animX = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease };
-            var animY = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease };
+            // Slightly longer than the 50ms reorder throttle so the motion
+            // chains into a continuous, fluid slide instead of staccato hops.
+            var animX = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease };
+            var animY = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease };
             slide.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, animX);
             slide.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, animY);
         }
@@ -1255,14 +1322,23 @@ public partial class MainWindow : INotifyPropertyChanged
             }
             if (DragGhost.Visibility != Visibility.Visible)
             {
-                DragGhost.Visibility = Visibility.Visible;
                 DragGhostImage.Source = _dragTile.Icon;
-                DragGhost.UpdateLayout();
+                DragGhost.Visibility = Visibility.Visible;
+                DragGhost.UpdateLayout(); // ActualWidth/Height needed below
+                // macOS-style pickup pop: the ghost springs up from 70%.
+                var pop = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
+                DragGhostScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+                    new DoubleAnimation(1, TimeSpan.FromMilliseconds(220)) { EasingFunction = pop });
+                DragGhostScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+                    new DoubleAnimation(1, TimeSpan.FromMilliseconds(220)) { EasingFunction = pop });
+                DragGhostScale.ScaleX = 0.7;
+                DragGhostScale.ScaleY = 0.7;
             }
-            // Center the ghost under the cursor (not its top-left corner).
-            var ghostX = pos.X - DragGhost.ActualWidth / 2;
-            var ghostY = pos.Y - DragGhost.ActualHeight / 2;
-            DragGhost.Margin = new Thickness(ghostX, ghostY, 0, 0);
+            // Center the ghost under the cursor via its TranslateTransform:
+            // render-only, so the per-frame move never triggers a layout pass
+            // (the old Margin assignment was the drag jitter source).
+            DragGhostSlide.X = pos.X - DragGhost.ActualWidth / 2;
+            DragGhostSlide.Y = pos.Y - DragGhost.ActualHeight / 2;
             e.Handled = true;
 
             // Live reorder: re-render the page so the other icons flow around
@@ -1301,10 +1377,12 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
-    // True while the cursor sits in the middle 55% of a tile cell: the user
+    // True while the cursor sits in the middle ~62% of a tile cell: the user
     // is aiming AT that tile (group intent), not at a gap (reorder intent).
     // Freezing the reorder preview here stops the target tile from sliding
     // away under the cursor, so a drop / hover can actually land on it.
+    // The wider dead-zone makes grouping easy (macOS never slides the target
+    // away from under you).
     private bool IsHoveringTileCenter(System.Windows.Point gridPos)
     {
         if (AppsList.ActualWidth < 100)
@@ -1319,14 +1397,17 @@ public partial class MainWindow : INotifyPropertyChanged
         var inCellY = gridPos.Y % GridCellHeight;
         if (inCellY < 0)
             inCellY += GridCellHeight;
-        const double edge = 0.225; // outer 22.5% on each side = reorder zone
+        const double edge = 0.19; // outer 19% on each side = reorder zone
         return inCellX > cellW * edge && inCellX < cellW * (1 - edge)
             && inCellY > GridCellHeight * edge && inCellY < GridCellHeight * (1 - edge);
     }
 
     // Hover-to-group: (re)arms a short timer while the ghost rests over a
-    // *different* app tile; moving off the tile disarms it. When the timer
-    // elapses the two tiles fold into a group immediately (no drop needed).
+    // *different* tile (app OR existing folder); moving off it disarms the
+    // timer. When it elapses, the tiles fold into a group (or the dragged
+    // app flies into the hovered folder) immediately — no drop needed.
+    // While hovering, the target tile gently scales up ("press to accept"),
+    // exactly like macOS Launchpad's folder-create feedback.
     private void UpdateHoverGroupTimer(System.Windows.Point gridPos)
     {
         if (_dragTile is null || _tileDragFromGroup || _openGroup is not null)
@@ -1344,6 +1425,7 @@ public partial class MainWindow : INotifyPropertyChanged
             return; // already counting down on this tile
         StopHoverGroupTimer();
         _hoverGroupTarget = over;
+        HighlightHoverTarget(over, true);
         _hoverGroupTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(HoverGroupDelayMs)
@@ -1353,10 +1435,51 @@ public partial class MainWindow : INotifyPropertyChanged
         _hoverGroupTimer.Start();
     }
 
+    private void StopHoverGroupTimer()
+    {
+        _hoverGroupTimer?.Stop();
+        _hoverGroupTimer = null;
+        _hoverGroupTarget = null;
+        HighlightHoverTarget(null, false);
+    }
+
+    // Scales the tile under the ghost up (true) or restores it (false) —
+    // pure RenderTransform animation, so it costs no layout passes.
+    private void HighlightHoverTarget(ITileRow? tile, bool on)
+    {
+        if (_hoverHighlightContainer is not null)
+        {
+            var c = _hoverHighlightContainer;
+            _hoverHighlightContainer = null;
+            AnimateTileScale(c, 1.0);
+        }
+        if (!on || tile is null)
+            return;
+        if (AppsList.ItemContainerGenerator.ContainerFromItem(tile) is ListBoxItem container)
+        {
+            _hoverHighlightContainer = container;
+            AnimateTileScale(container, 1.12);
+        }
+    }
+
+    private static void AnimateTileScale(ListBoxItem container, double to)
+    {
+        if (container.RenderTransform is not ScaleTransform scale)
+        {
+            scale = new ScaleTransform(1, 1);
+            container.RenderTransform = scale;
+        }
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(to, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(to, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+    }
+
     // The tile visually under the cursor: the reorder target index mapped
     // back onto the current page slice (the dragged tile itself excluded —
     // it still occupies its old slot in ItemsSource during the preview).
-    private AppRow? TileAtGridPoint(System.Windows.Point gridPos)
+    private ITileRow? TileAtGridPoint(System.Windows.Point gridPos)
     {
         var targetIndex = ComputeDragTargetIndex(gridPos);
         var pageStart = _pageIndex * Math.Max(1, _pageSize);
@@ -1366,7 +1489,7 @@ public partial class MainWindow : INotifyPropertyChanged
             var i = 0;
             foreach (var item in items)
             {
-                if (i == local && item is AppRow row && !ReferenceEquals(row, _dragTile))
+                if (i == local && item is ITileRow row && !ReferenceEquals(row, _dragTile))
                     return row;
                 i++;
             }
@@ -1374,7 +1497,7 @@ public partial class MainWindow : INotifyPropertyChanged
         return null;
     }
 
-    private void FireHoverGroup(AppRow target)
+    private void FireHoverGroup(ITileRow target)
     {
         StopHoverGroupTimer();
         if (_dragTile is null || _tileDragFromGroup || _openGroup is not null)
@@ -1386,14 +1509,16 @@ public partial class MainWindow : INotifyPropertyChanged
         _dragTile = null;
         _tileDragArmed = false;
         DragGhost.Visibility = Visibility.Collapsed;
-        CreateGroup(source, target);
-    }
-
-    private void StopHoverGroupTimer()
-    {
-        _hoverGroupTimer?.Stop();
-        _hoverGroupTimer = null;
-        _hoverGroupTarget = null;
+        switch (target)
+        {
+            case AppRow app:
+                CreateGroup(source, app);
+                break;
+            case GroupRow folder:
+                AddToGroup(folder, source);
+                ApplyFilter(true); // the dragged tile disappears into the folder
+                break;
+        }
     }
 
     // ── Drag: mouse-up (group create / add / remove / drop) ───────
