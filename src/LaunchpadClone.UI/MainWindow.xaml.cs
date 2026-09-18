@@ -278,8 +278,14 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         base.OnSourceInitialized(e);
 
-        // Blur the desktop behind the scrim (graceful no-op if unsupported).
-        WindowAccentBlur.EnableBlurBehind(this);
+        // Capture the desktop BEFORE this window paints over it. The tiny
+        // snapshot upscaled behind the scrim replaces the DWM blur accent —
+        // it is a one-shot static image, so nothing per-frame remains.
+        var shot = DesktopSnapshot.Capture();
+        if (shot is not null)
+            BackdropImage.Source = shot;
+        else
+            WindowAccentBlur.EnableBlurBehind(this); // graceful fallback
 
         // Global hotkey: native poll (no window hook needed).
         StartHotKeyPoller();
@@ -641,11 +647,6 @@ public partial class MainWindow : INotifyPropertyChanged
         PageSlide.X = direction * travel;
         PageSlide.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(0, TimeSpan.FromMilliseconds(380)) { EasingFunction = ease });
-
-        AppsList.BeginAnimation(OpacityProperty, null);
-        AppsList.Opacity = 0.4;
-        AppsList.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, TimeSpan.FromMilliseconds(320)) { EasingFunction = ease });
     }
 
     // Tile cell footprint must match the template (tile width + 8px side
@@ -1033,8 +1034,6 @@ public partial class MainWindow : INotifyPropertyChanged
     // overshoot while its member icons slide up into place.
     private void OpenGroup(GroupRow gr)
     {
-        var reopen = ReferenceEquals(_openGroup, gr)
-            && GroupOverlay.Visibility == Visibility.Visible;
         _openGroup = gr;
         var memberRows = new List<AppRow>();
         foreach (var id in gr.Group.MemberIds)
@@ -1046,12 +1045,13 @@ public partial class MainWindow : INotifyPropertyChanged
             row.ShowRemoveBadge = true;
         GroupNameBox.Text = gr.Group.Name;
         // macOS behavior: the folder panel pops up AT the folder tile's spot.
-        if (!reopen)
-            PositionGroupCard(gr);
-        if (reopen)
-            return; // content refresh only (add/remove member) — no re-zoom
+        // The card must be measurable: make the overlay visible but fully
+        // transparent first (Collapsed elements report no size), position,
+        // then run the open animation.
         GroupOverlay.Opacity = 0;
         GroupOverlay.Visibility = Visibility.Visible;
+        GroupOverlay.UpdateLayout();
+        PositionGroupCard(gr);
         AnimateGroupOpen();
         // The name field is editable right away (macOS: rename inline in the
         // open folder), committed on Enter.
@@ -1466,7 +1466,7 @@ public partial class MainWindow : INotifyPropertyChanged
                 var target = ComputeDragTargetIndex(gridPos);
                 var now = Environment.TickCount64;
                 var home = _filtered.IndexOf(AnyDragTile);
-                if (target != _dragTargetIndex && target != home && now - _lastReorderMs >= 50)
+                if (target != _dragTargetIndex && target != home && now - _lastReorderMs >= 80)
                 {
                     _lastReorderMs = now;
                     _dragTargetIndex = target;

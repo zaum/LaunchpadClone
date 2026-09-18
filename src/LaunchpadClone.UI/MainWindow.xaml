@@ -164,6 +164,11 @@
          itself is a lighter rounded panel floating above). -->
     <Border x:Name="RootScrim" Background="#9E000000">
         <Grid>
+            <!-- Static blurred desktop snapshot (captured once before the
+                 window paints): zero per-frame blur cost. -->
+            <Image x:Name="BackdropImage" Stretch="UniformToFill"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   Opacity="0" IsHitTestVisible="False" />
             <Border x:Name="ScrimDim" Background="#50000000" Opacity="0" IsHitTestVisible="False" />
         <Grid>
             <Grid.RowDefinitions>

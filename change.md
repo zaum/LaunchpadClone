@@ -6,6 +6,16 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🛠️ Maintenance · Static Snapshot Backdrop & Folder-Card Positioning Fix
+
+* **Blur is now literally a static image:** the desktop is captured ONCE before the overlay paints (downscaled to 96px, upscaled behind the scrim = free gaussian-ish blur). The DWM acrylic accent is gone — nothing re-samples per frame anymore; the snapshot falls back to the old accent if capture fails.
+* **Folder card reliably opens at its tile:** the card was measured while its parent overlay was `Collapsed` (reports zero size), so positioning silently bailed — now the overlay is made visible at zero opacity first, positioned, then animated. Also re-positions on reopen.
+* **Drag-reorder throttle raised 50 → 80 ms** and the fullscreen page-flip opacity fade removed (slide only) — fewer full-page re-renders and no whole-window recomposition while typing/dragging.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🛠️ Maintenance · Render-Performance Pass & Layout Safety
 
 * **Removed every per-tile `DropShadowEffect`:** WPF bitmap effects are software-rendered and re-evaluated every animated frame — they were the heaviest remaining cost during drag/reorder glides. Group tiles use `BitmapCache` now (frozen pixel snapshot, GPU-friendly transforms), and the drag ghost lost its shadow for a crisper, cheaper trail.
