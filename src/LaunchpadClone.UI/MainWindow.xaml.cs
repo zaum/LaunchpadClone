@@ -250,15 +250,17 @@ public partial class MainWindow : INotifyPropertyChanged
         // Single click launches (macOS style) via OnMouseLeftButtonUp —
         // no DoubleClick handler on purpose: it would fire a second launch.
         AppsList.SizeChanged += (_, _) => RecomputeLayout();
+        // The folder name commits ONLY on Enter — clicking away just returns
+        // to the grid view without renaming (macOS-like explicit commit).
         GroupNameBox.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter)
             {
                 CommitGroupName();
+                CloseGroup();
                 e.Handled = true;
             }
         };
-        GroupNameBox.LostFocus += (_, _) => CommitGroupName();
 
         SearchBox.TextChanged += (_, _) => ApplyFilter();
         Loaded += OnLoaded;
@@ -281,6 +283,18 @@ public partial class MainWindow : INotifyPropertyChanged
 
         // Global hotkey: native poll (no window hook needed).
         StartHotKeyPoller();
+    }
+
+    // After the window becomes active (first show, hot-corner, hotkey), the
+    // search box takes the keyboard — typing starts filtering immediately.
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            SearchBox.Focus();
+            Keyboard.Focus(SearchBox);
+        }), DispatcherPriority.Input);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -369,7 +383,14 @@ public partial class MainWindow : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        SearchBox.Focus();
+        // Focus the search box AFTER the first layout pass: a plain Focus()
+        // during Loaded is too early for a freshly-shown Topmost window and
+        // silently loses to window activation.
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            SearchBox.Focus();
+            Keyboard.Focus(SearchBox);
+        }), DispatcherPriority.Input);
 
         try
         {
@@ -1045,6 +1066,10 @@ public partial class MainWindow : INotifyPropertyChanged
         GroupOverlay.Opacity = 0;
         GroupOverlay.Visibility = Visibility.Visible;
         AnimateGroupOpen();
+        // The name field is editable right away (macOS: rename inline in the
+        // open folder), committed on Enter.
+        Dispatcher.BeginInvoke(new Action(() => Keyboard.Focus(GroupNameBox)),
+            DispatcherPriority.Input);
     }
 
     private void CloseGroup(bool relaunchFilter = true)
@@ -1671,10 +1696,17 @@ public partial class MainWindow : INotifyPropertyChanged
         if (IsWithinControl(clickSource))
             return;
 
-        if (FindMemberContainer(clickSource) is { } member
-            && member.DataContext is AppRow groupApp)
+        // Inside the open folder: member icons launch, clicking the empty
+        // backdrop beside the card just steps back to the grid view — the
+        // launcher itself stays open (dismissal is for the grid, not the
+        // folder you are actively managing).
+        if (_openGroup is not null)
         {
-            TryLaunch(groupApp);
+            if (FindMemberContainer(clickSource) is { } member
+                && member.DataContext is AppRow groupApp)
+                TryLaunch(groupApp);
+            else
+                CloseGroup();
             return;
         }
 

@@ -6,6 +6,17 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Chromeless Text Fields & Polite Folder Dismissal
+
+* **Search box gets real keyboard focus at startup:** a deferred `Focus()` + `Keyboard.Focus()` after window activation (`OnActivated`) — previously the plain call during `Loaded` lost to window activation and typing went nowhere until you clicked.
+* **No more blue focus underline or punched-out field:** the search box and folder name field now use a fully chromeless `TextBox` template (transparent background, no border, no focus rectangle) — text floats directly on the search pill / folder card background.
+* **Clicking beside the open folder no longer quits the launcher:** it steps back to the grid view (`CloseGroup`), keeping the app open. The full dismiss only happens from the grid itself.
+* **Folder name commits only on Enter** (and closes back to the grid). Clicking away no longer renames — previously `LostFocus` committed the half-typed name.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🐛 Fixes · New Folder Appears at the Target Tile's Spot
 
 * Group creation now anchors the new folder at the **target** tile's position (the icon you hovered onto / dropped over) instead of the dragged icon's origin — matching macOS Launchpad, where the folder materializes exactly under your cursor.

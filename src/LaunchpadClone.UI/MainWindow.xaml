@@ -15,6 +15,28 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
+        <!-- Fully chromeless TextBox: no focus rectangle, no themed border,
+             no "punched-out" background — text floats on its parent's fill.
+             Used by the search box and the folder name field. -->
+        <Style x:Key="ChromelessTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CaretBrush" Value="#FFFFFF" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Grid>
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Focusable="False"
+                                          HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Hidden" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Shared ✕ badge look; the Button instance picks the color.
              The glyph is Segoe Fluent "ChromeClose" — same icon font
              family as the rest of the chrome (QuickLook-style). -->
@@ -163,7 +185,7 @@
                                FontSize="15" Foreground="#99FFFFFF" Margin="14,0,0,0"
                                VerticalAlignment="Center" IsHitTestVisible="False" />
                     <TextBox x:Name="SearchBox" Height="40" FontSize="15" Margin="40,0,44,0"
-                             Background="Transparent" BorderThickness="0" CaretBrush="#FFFFFF"
+                             Style="{StaticResource ChromelessTextBox}"
                              Foreground="#FFFFFF" VerticalContentAlignment="Center" />
                     <TextBlock Text="Search" FontSize="15" Margin="44,0,44,0" Foreground="#99FFFFFF"
                                VerticalAlignment="Center" IsHitTestVisible="False">
@@ -287,8 +309,8 @@
                     </Border.RenderTransform>
                     <StackPanel>
                         <TextBox x:Name="GroupNameBox" Width="360" Height="40" FontSize="18"
-                                 TextAlignment="Center" Background="Transparent" Foreground="White"
-                                 BorderThickness="0" CaretBrush="White"
+                                 Style="{StaticResource ChromelessTextBox}"
+                                 TextAlignment="Center" Foreground="White"
                                  VerticalContentAlignment="Center" Margin="0,0,0,18" />
                         <ListBox x:Name="GroupMembers" Background="Transparent" BorderThickness="0"
                                  ItemTemplate="{StaticResource AppTileTemplate}"
