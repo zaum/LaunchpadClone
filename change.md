@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 17
+* **Total commits:** 18
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -10,7 +10,7 @@
 
 * Group creation now anchors the new folder at the **target** tile's position (the icon you hovered onto / dropped over) instead of the dragged icon's origin — matching macOS Launchpad, where the folder materializes exactly under your cursor.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `c2f7a91`
 
 ---
 
