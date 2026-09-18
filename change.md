@@ -1,6 +1,6 @@
 # LaunchpadClone — Changelog
 
-* **Total commits:** 16
+* **Total commits:** 17
 * **Date range:** 2026-09-13 – 2026-09-18
 * **Environment / Context:** Master branch, development iteration
 
@@ -13,7 +13,7 @@
 * **Drag start no longer stalls:** the reorder preview used to re-render the whole page the moment the drag armed (even before the cursor left the tile's own cell) — now the placeholder only replaces the dragged tile once the cursor actually leaves its home cell, and the ghost pickup animation sets its start value before attaching the animation.
 * **Default grid size is now centered** (`tileScale` 1.05, the middle of the slider range) instead of the compact extreme.
 
-`Direct Commit` · `pending`
+`Direct Commit` · `084bdf8`
 
 ---
 
