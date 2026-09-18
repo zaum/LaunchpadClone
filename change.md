@@ -6,6 +6,17 @@
 
 ---
 
+### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · Opaque Folder Panel, Vector Gear & Instant Icon Startup
+
+* Made the open-folder card opaque (`#F2262B33`, Fluent "smoke" tone) so member icons no longer fight the busy grid shining through the panel.
+* Replaced the font-dependent `⚙` text glyph with a real vector gear `Path` for the settings button, with a subtle hover highlight — it now renders identically on every machine.
+* Instant icon startup: cached icon PNGs are decoded synchronously in `RenderApps`, so tiles never paint empty while the async extraction warms up (previously every launch showed blank tiles until extraction caught up).
+* Verified settings persistence end-to-end: grid size (`tileScale`), hotkey, and hot-corner choices save to `launchpad-settings.json` immediately on change and reload at startup.
+
+`Direct Commit` · `pending`
+
+---
+
 ### <sup><sub style="font-size: 0.7em;">2026-09-18</sub></sup> · 🎨 UI/UX · macOS-Style Folder View & Fluid Drag Animations
 
 * Reworked the open-group view to match macOS Launchpad: instead of a fullscreen dark overlay, the folder now opens as a lighter, rounded translucent card with a soft shadow, while an extra dim layer fades in over the still-blurred backdrop.

@@ -465,11 +465,41 @@ public partial class MainWindow : INotifyPropertyChanged
             var row = new AppRow(app);
             if (_iconMemoryCache.TryGetValue(app.Id, out var icon))
                 row.Icon = icon;
+            // Instant startup: a cached icon on disk is decoded right away so
+            // tiles never paint empty while async extraction warms up.
+            else if (app.IconCachePath is { Length: > 0 } p && File.Exists(p)
+                     && TryLoadCachedIcon(p) is { } cached)
+            {
+                lock (_iconLock)
+                    _iconMemoryCache[app.Id] = cached;
+                row.Icon = cached;
+            }
             _rows.Add(row);
             _rowsById[app.Id] = row;
         }
         RefreshAllGroupPreviews();
         ApplyFilter();
+    }
+
+    // Decodes a cached icon PNG off the UI thread's critical path; a corrupt
+    // or deleted file just yields no icon (extraction will rebuild it).
+    private static ImageSource? TryLoadCachedIcon(string path)
+    {
+        try
+        {
+            var source = new BitmapImage();
+            source.BeginInit();
+            source.UriSource = new Uri("file:///" + path.Replace("\\", "/"));
+            source.DecodePixelWidth = 96;
+            source.CacheOption = BitmapCacheOption.OnLoad;
+            source.EndInit();
+            source.Freeze();
+            return source;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // Stable id of a tile in the saved layout order.
