@@ -48,6 +48,41 @@
             </Border>
         </ControlTemplate>
 
+        <Style x:Key="AnimatedDeleteBadgeStyle" TargetType="Button">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform ScaleX="0.25" ScaleY="0.25" />
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Visibility" Value="Visible">
+                    <Setter Property="Opacity" Value="1" />
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1" Duration="0:0:0.14" />
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                 From="0.05" To="1" Duration="0:0:0.46">
+                                    <DoubleAnimation.EasingFunction>
+                                        <BackEase EasingMode="EaseOut" Amplitude="0.9" />
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                 From="0.05" To="1" Duration="0:0:0.46">
+                                    <DoubleAnimation.EasingFunction>
+                                        <BackEase EasingMode="EaseOut" Amplitude="0.9" />
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="SettingsCardStyle" TargetType="Border">
             <Setter Property="Background" Value="#0DFFFFFF" />
             <Setter Property="BorderBrush" Value="#18FFFFFF" />
@@ -96,7 +131,8 @@
              keeps downscaled icons sharp. -->
         <DataTemplate x:Key="AppTileTemplate">
             <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
-                  CacheMode="BitmapCache">
+                  CacheMode="BitmapCache" ContextMenuOpening="OnAppContextMenuOpening"
+                  ContextMenuClosing="OnAppContextMenuClosing">
                 <Grid.ToolTip>
                     <ToolTip>
                         <ToolTip.Template>
@@ -133,6 +169,7 @@
                         Visibility="{Binding ShowRemoveBadge, Converter={StaticResource BoolToVisibility}}" />
                 <!-- Uninstall badge (jiggle mode). -->
                 <Button Click="OnUninstallClick" ToolTip="Uninstall" Cursor="Hand"
+                        Style="{StaticResource AnimatedDeleteBadgeStyle}"
                         Background="#CCC0392B" Template="{StaticResource BadgeTemplate}"
                         Width="22" Height="22" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Visibility="{Binding ShowUninstallBadge, Converter={StaticResource BoolToVisibility}}" />
@@ -141,14 +178,14 @@
         <!-- A folder stays in the main flow. Clicking it expands the same
              item to a 2x2-cell panel, so the WrapPanel moves later tiles. -->
         <DataTemplate x:Key="GroupTileTemplate">
-            <Grid x:Name="GroupTileRoot" Margin="10,6">
+            <Grid x:Name="GroupTileRoot">
                 <Grid.Style>
                     <Style TargetType="Grid">
                         <Setter Property="Width" Value="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                                 <Setter Property="Width" Value="{Binding ExpandedWidth}" />
-                                <Setter Property="Height" Value="{Binding ExpandedHeight}" />
+                                <Setter Property="MinHeight" Value="{Binding ExpandedHeight}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -180,47 +217,55 @@
 
                 <Border x:Name="ExpandedFolder" Visibility="Collapsed"
                         Background="#2EFFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
-                        CornerRadius="16" Padding="18">
+                        CornerRadius="16" Padding="18" Opacity="0"
+                        RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="ExpandedFolderScale" ScaleX="0.82" ScaleY="0.82" />
+                    </Border.RenderTransform>
                     <StackPanel>
                         <Grid Margin="2,0,2,12">
-                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
-                                       FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="Click outside to close" Foreground="#70FFFFFF"
-                                       FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            <TextBox Text="{Binding DisplayName, Mode=OneWay}"
+                                     Style="{StaticResource ChromelessTextBox}"
+                                     Foreground="White" FontSize="13" FontWeight="SemiBold"
+                                     TextAlignment="Center"
+                                     VerticalContentAlignment="Center" Cursor="IBeam"
+                                     ToolTip="Click to rename"
+                                     PreviewMouseLeftButtonDown="OnInlineGroupNameMouseDown"
+                                     LostKeyboardFocus="OnInlineGroupNameLostFocus"
+                                     KeyDown="OnInlineGroupNameKeyDown" />
                         </Grid>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding Members}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel HorizontalAlignment="Center" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Tag="InlineGroupMember"
-                                                Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                Margin="4,6" Padding="5" CornerRadius="10" Background="Transparent"
-                                                Cursor="Hand">
-                                            <StackPanel>
-                                                <Image Source="{Binding Icon}"
-                                                       Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                       Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                       HorizontalAlignment="Center"
-                                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                                <TextBlock Text="{Binding DisplayName}" Margin="0,5,0,0"
-                                                           Foreground="#EFFFFFFF" FontSize="12.5"
-                                                           TextAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <ItemsControl ItemsSource="{Binding Members}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel HorizontalAlignment="Center" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Tag="InlineGroupMember"
+                                            Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Margin="4,6" Padding="5" CornerRadius="10" Background="Transparent"
+                                            Cursor="Hand">
+                                        <StackPanel>
+                                            <Image Source="{Binding Icon}"
+                                                   Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                   Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                   HorizontalAlignment="Center"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                            <TextBlock Text="{Binding DisplayName}" Margin="0,5,0,0"
+                                                       Foreground="#EFFFFFFF" FontSize="12.5"
+                                                       TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </Border>
 
                 <!-- Delete-group badge (jiggle mode). -->
                 <Button Click="OnRemoveGroupClick" ToolTip="Delete group" Cursor="Hand"
+                        Style="{StaticResource AnimatedDeleteBadgeStyle}"
                         Background="#CCC0392B" Template="{StaticResource BadgeTemplate}"
                         Width="22" Height="22" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Visibility="{Binding ShowRemoveBadge, Converter={StaticResource BoolToVisibility}}" />
@@ -229,6 +274,30 @@
                 <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                     <Setter TargetName="CollapsedFolder" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="ExpandedFolder" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="ExpandedFolder" Property="Opacity" Value="1" />
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="ExpandedFolder"
+                                                 Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1" Duration="0:0:0.22" />
+                                <DoubleAnimation Storyboard.TargetName="ExpandedFolderScale"
+                                                 Storyboard.TargetProperty="ScaleX"
+                                                 From="0.82" To="1" Duration="0:0:0.38">
+                                    <DoubleAnimation.EasingFunction>
+                                        <BackEase EasingMode="EaseOut" Amplitude="0.38" />
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetName="ExpandedFolderScale"
+                                                 Storyboard.TargetProperty="ScaleY"
+                                                 From="0.82" To="1" Duration="0:0:0.38">
+                                    <DoubleAnimation.EasingFunction>
+                                        <BackEase EasingMode="EaseOut" Amplitude="0.38" />
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -241,6 +310,10 @@
              hovering over a tile can gently scale it up). -->
         <Style x:Key="TileItemStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="8,12" />
+            <!-- An expanded folder makes its WrapPanel row taller. Keep the
+                 neighboring tile containers at their own desired height so
+                 their hover background never stretches to folder height. -->
+            <Setter Property="VerticalAlignment" Value="Top" />
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -350,29 +423,37 @@
 
             <!-- Paged grid; PageSlide drives the soft page-flip animation.
                  Custom mouse-ghost drag only (no Ole DragDrop). -->
-            <ListBox x:Name="AppsList" Grid.Row="1" Margin="40,12,40,0"
-                     Background="Transparent" BorderThickness="0"
-                     Focusable="False" FocusVisualStyle="{x:Null}"
-                     ItemTemplateSelector="{StaticResource TileSelector}"
-                     ItemContainerStyle="{StaticResource TileItemStyle}"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ScrollViewer.VerticalScrollBarVisibility="Hidden">
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <WrapPanel HorizontalAlignment="Center" Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-                <ListBox.RenderTransform>
-                    <TranslateTransform x:Name="PageSlide" />
-                </ListBox.RenderTransform>
-            </ListBox>
+            <Grid Grid.Row="1" Margin="40,12,40,0" ClipToBounds="True">
+                <ListBox x:Name="AppsList"
+                         Background="Transparent" BorderThickness="0"
+                         Focusable="False" FocusVisualStyle="{x:Null}"
+                         ItemTemplateSelector="{StaticResource TileSelector}"
+                         ItemContainerStyle="{StaticResource TileItemStyle}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Hidden">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel HorizontalAlignment="Center" Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.RenderTransform>
+                        <TranslateTransform x:Name="PageSlide" />
+                    </ListBox.RenderTransform>
+                </ListBox>
+                <Image x:Name="OutgoingPageSnapshot" Visibility="Collapsed"
+                       IsHitTestVisible="False" Stretch="Fill" Panel.ZIndex="5">
+                    <Image.RenderTransform>
+                        <TranslateTransform x:Name="OutgoingPageSlide" />
+                    </Image.RenderTransform>
+                </Image>
+            </Grid>
 
             <StackPanel Grid.Row="2" HorizontalAlignment="Center">
                 <!-- Page indicator dots; they brighten on flips and fade back. -->
                 <StackPanel x:Name="PageDots" Orientation="Horizontal"
                             HorizontalAlignment="Center" Opacity="0.45" />
                 <TextBlock x:Name="StatusText" Text="Starting..."
-                           HorizontalAlignment="Center" Margin="0,8,0,20"
+                           Visibility="Collapsed" HorizontalAlignment="Center" Margin="0"
                            Foreground="#80FFFFFF" FontSize="12" />
             </StackPanel>
             <!-- Drag ghost for icon drag (grouping / reorder / drag-out).
@@ -381,15 +462,19 @@
                  the jittery drag), with a soft macOS-style pop on pickup. -->
             <Border x:Name="DragGhost" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Top"
                     IsHitTestVisible="False" Visibility="Collapsed" Panel.ZIndex="30"
-                    Background="#8816171B" CornerRadius="16" Padding="12"
+                    Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Background="Transparent" Padding="0"
                     RenderTransformOrigin="0.5,0.5">
                 <Border.RenderTransform>
                     <TransformGroup>
-                        <TranslateTransform x:Name="DragGhostSlide" />
                         <ScaleTransform x:Name="DragGhostScale" />
+                        <!-- Translation must come after scale so the pickup
+                             zoom never scales the cursor coordinates. -->
+                        <TranslateTransform x:Name="DragGhostSlide" />
                     </TransformGroup>
                 </Border.RenderTransform>
-                <Image x:Name="DragGhostImage" Width="64" Height="64" />
+                <Image x:Name="DragGhostImage" Stretch="Uniform" />
             </Border>
 
             <!-- Open group ("folder") view — macOS Launchpad style:
@@ -499,17 +584,12 @@
                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
                                                      Checked="OnHotCornerToggled" Unchecked="OnHotCornerToggled" />
                                 </Grid>
-                                <Border Width="180" Height="84" Margin="0,14,0,0"
+                                <Border Width="138" Height="84" Margin="0,14,0,0"
                                         HorizontalAlignment="Center" CornerRadius="13"
                                         Background="#09000000" BorderBrush="#40FFFFFF" BorderThickness="2">
                                     <Grid>
                                         <Border Margin="12" CornerRadius="7" Background="#08FFFFFF"
-                                                BorderBrush="#16FFFFFF" BorderThickness="1">
-                                            <TextBlock Text="Choose the corner&#x0a;that opens Launchpad"
-                                                       FontSize="9.5" Foreground="#78FFFFFF"
-                                                       TextAlignment="Center" TextWrapping="Wrap"
-                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
+                                                BorderBrush="#16FFFFFF" BorderThickness="1" />
                                         <Button x:Name="TopLeftCornerButton" Tag="TopLeft" Click="OnCornerClick"
                                                 Style="{StaticResource CornerChoiceButtonStyle}"
                                                 Width="30" Height="30" Margin="-2" HorizontalAlignment="Left" VerticalAlignment="Top">
