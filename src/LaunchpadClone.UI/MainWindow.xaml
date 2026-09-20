@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:local="clr-namespace:LaunchpadClone.UI"
-        Title="Launchpad" WindowStyle="None" AllowsTransparency="True"
-        Background="Transparent" WindowState="Maximized" Topmost="True"
+        Title="Launchpad" WindowStyle="None" AllowsTransparency="False"
+        Background="Black" WindowState="Maximized" Topmost="True"
         ShowInTaskbar="False" ResizeMode="NoResize" ShowActivated="True"
          FontFamily="Segoe UI Variable Display, Segoe UI"
          PreviewMouseLeftButtonDown="OnMouseLeftButtonDown" PreviewMouseLeftButtonUp="OnMouseLeftButtonUp"
@@ -47,6 +47,47 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
         </ControlTemplate>
+
+        <Style x:Key="SettingsCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#0DFFFFFF" />
+            <Setter Property="BorderBrush" Value="#18FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Padding" Value="18" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="CornerChoiceButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="112" />
+            <Setter Property="Height" Value="68" />
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#DFFFFFFF" />
+            <Setter Property="Background" Value="#08FFFFFF" />
+            <Setter Property="BorderBrush" Value="#18FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Card" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10" Padding="10">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Card" Property="Background" Value="#18FFFFFF" />
+                                <Setter TargetName="Card" Property="BorderBrush" Value="#38FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Card" Property="Opacity" Value="0.72" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <!-- One app tile: sized from the window's live grid-size settings.
              RenderOptions: the FLIP-glide animates RenderTransforms every
@@ -97,13 +138,26 @@
                         Visibility="{Binding ShowUninstallBadge, Converter={StaticResource BoolToVisibility}}" />
             </Grid>
         </DataTemplate>
-        <!-- Group tile: 3x3 mini grid of up to 9 member icons. -->
+        <!-- A folder stays in the main flow. Clicking it expands the same
+             item to a 2x2-cell panel, so the WrapPanel moves later tiles. -->
         <DataTemplate x:Key="GroupTileTemplate">
-            <Grid Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}">
-                <StackPanel>
+            <Grid x:Name="GroupTileRoot" Margin="10,6">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Width" Value="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                <Setter Property="Width" Value="{Binding ExpandedWidth}" />
+                                <Setter Property="Height" Value="{Binding ExpandedHeight}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+
+                <StackPanel x:Name="CollapsedFolder">
                     <Border Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
                             Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
-                            CornerRadius="24" Background="#2EFFFFFF" Padding="13"
+                            CornerRadius="14" Background="#2EFFFFFF" Padding="13"
                             CacheMode="BitmapCache">
                         <UniformGrid Rows="3" Columns="3">
                             <Image Source="{Binding Previews[0]}" Margin="2" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -123,12 +177,60 @@
                                MaxWidth="{Binding LabelMaxWidth, RelativeSource={RelativeSource AncestorType=Window}}"
                                ToolTip="{Binding DisplayName}" />
                 </StackPanel>
+
+                <Border x:Name="ExpandedFolder" Visibility="Collapsed"
+                        Background="#2EFFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                        CornerRadius="16" Padding="18">
+                    <StackPanel>
+                        <Grid Margin="2,0,2,12">
+                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                       FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="Click outside to close" Foreground="#70FFFFFF"
+                                       FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        </Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding Members}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel HorizontalAlignment="Center" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Tag="InlineGroupMember"
+                                                Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Margin="4,6" Padding="5" CornerRadius="10" Background="Transparent"
+                                                Cursor="Hand">
+                                            <StackPanel>
+                                                <Image Source="{Binding Icon}"
+                                                       Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                       Height="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                       HorizontalAlignment="Center"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                                <TextBlock Text="{Binding DisplayName}" Margin="0,5,0,0"
+                                                           Foreground="#EFFFFFFF" FontSize="12.5"
+                                                           TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+
                 <!-- Delete-group badge (jiggle mode). -->
                 <Button Click="OnRemoveGroupClick" ToolTip="Delete group" Cursor="Hand"
                         Background="#CCC0392B" Template="{StaticResource BadgeTemplate}"
                         Width="22" Height="22" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Visibility="{Binding ShowRemoveBadge, Converter={StaticResource BoolToVisibility}}" />
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter TargetName="CollapsedFolder" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="ExpandedFolder" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <local:TileTemplateSelector x:Key="TileSelector"
@@ -168,7 +270,7 @@
                  window paints): zero per-frame blur cost. -->
             <Image x:Name="BackdropImage" Stretch="UniformToFill"
                    RenderOptions.BitmapScalingMode="HighQuality"
-                   Opacity="0" IsHitTestVisible="False" />
+                   Opacity="0.38" IsHitTestVisible="False" />
             <Border x:Name="ScrimDim" Background="#50000000" Opacity="0" IsHitTestVisible="False" />
         <Grid>
             <Grid.RowDefinitions>
@@ -312,10 +414,32 @@
                         <ScaleTransform x:Name="GroupCardScale" ScaleX="0.86" ScaleY="0.86" />
                     </Border.RenderTransform>
                     <StackPanel>
-                        <TextBox x:Name="GroupNameBox" Width="360" Height="40" FontSize="18"
-                                 Style="{StaticResource ChromelessTextBox}"
-                                 TextAlignment="Center" Foreground="White"
-                                 VerticalContentAlignment="Center" Margin="0,0,0,18" />
+                        <StackPanel Margin="0,0,0,18">
+                            <Border Width="430" Height="44" Background="#14FFFFFF"
+                                    BorderBrush="#24FFFFFF" BorderThickness="1" CornerRadius="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="72" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="&#xE70F;" FontFamily="{StaticResource SegoeFluent}"
+                                               Foreground="#8FFFFFFF" FontSize="14"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <TextBox x:Name="GroupNameBox" Grid.Column="1" FontSize="18"
+                                             Style="{StaticResource ChromelessTextBox}"
+                                             TextAlignment="Center" Foreground="White"
+                                             VerticalContentAlignment="Center" />
+                                    <Button Grid.Column="2" Content="Save" Click="OnSaveGroupName"
+                                            Margin="6" Padding="10,0" Cursor="Hand"
+                                            Background="#356C8CFF" Foreground="White"
+                                            BorderBrush="#557C9CFF" BorderThickness="1" />
+                                </Grid>
+                            </Border>
+                            <TextBlock Text="Edit the title, then press Enter or Save"
+                                       HorizontalAlignment="Center" Margin="0,6,0,0"
+                                       Foreground="#72FFFFFF" FontSize="11" />
+                        </StackPanel>
                         <ListBox x:Name="GroupMembers" Background="Transparent" BorderThickness="0"
                                  ItemTemplate="{StaticResource AppTileTemplate}"
                                  ItemContainerStyle="{StaticResource TileItemStyle}"
@@ -338,79 +462,119 @@
             </Grid>
             <!-- Settings panel (gear / Done to close) -->
             <Border x:Name="SettingsOverlay" Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="40"
-                    Background="#99000000" Visibility="Collapsed">
-                <Border Width="500" Background="#222329" CornerRadius="16" Padding="28"
+                    Background="#B5000000" Visibility="Collapsed">
+                <Border Width="560" Background="#F51B1D24" CornerRadius="22" Padding="28"
+                        BorderBrush="#24FFFFFF" BorderThickness="1"
                         VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="42" ShadowDepth="0" Opacity="0.55" />
+                    </Border.Effect>
                     <StackPanel>
-                        <TextBlock Text="Settings" FontSize="20" FontWeight="SemiBold"
-                                   Foreground="White" Margin="0,0,0,20" />
-
-                        <TextBlock Text="Hot corner" Foreground="#9AA0AE" FontSize="12" Margin="0,0,0,6" />
-                        <!-- Hot corner toggle: native Fluent CheckBox (WPF UI) —
-                             themed knob, dark-mode aware, zero custom chrome. -->
-                        <ui:ToggleSwitch x:Name="HotCornerToggle" xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-                                         Content="Open when the mouse reaches a screen corner"
-                                         Foreground="White"
-                                         Checked="OnHotCornerToggled" Unchecked="OnHotCornerToggled" />
-                        <UniformGrid Columns="4" Margin="0,12,0,4">
-                            <Button Tag="TopLeft" Click="OnCornerClick" Cursor="Hand" Width="52" Height="52" Margin="6">
-                                <Path Data="M 30,6 L 6,6 L 6,30" Stroke="White" StrokeThickness="8"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                            </Button>
-                            <Button Tag="TopRight" Click="OnCornerClick" Cursor="Hand" Width="52" Height="52" Margin="6">
-                                <Path Data="M 6,6 L 30,6 L 30,30" Stroke="White" StrokeThickness="8"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                            </Button>
-                            <Button Tag="BottomRight" Click="OnCornerClick" Cursor="Hand" Width="52" Height="52" Margin="6">
-                                <Path Data="M 6,6 L 30,6 L 30,30" Stroke="White" StrokeThickness="8"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
-                                    <Path.RenderTransform>
-                                        <RotateTransform Angle="180" />
-                                    </Path.RenderTransform>
-                                </Path>
-                            </Button>
-                            <Button Tag="BottomLeft" Click="OnCornerClick" Cursor="Hand" Width="52" Height="52" Margin="6">
-                                <Path Data="M 30,6 L 6,6 L 6,30" Stroke="White" StrokeThickness="8"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
-                                    <Path.RenderTransform>
-                                        <RotateTransform Angle="180" />
-                                    </Path.RenderTransform>
-                                </Path>
-                            </Button>
-                        </UniformGrid>
-
-                        <Grid Margin="0,18,0,0">
+                        <Grid Margin="0,0,0,20">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="48" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="Grid size" Foreground="#9AA0AE" FontSize="12"
-                                       VerticalAlignment="Center" Grid.Row="1" Margin="0,0,16,0" />
-                            <TextBlock x:Name="GridSizePopup" Grid.Column="1" Grid.Row="0"
-                                       HorizontalAlignment="Left" Foreground="White"
-                                       FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6"
-                                       IsHitTestVisible="False" />
-                            <Slider x:Name="TileScaleSlider" Grid.Column="1" Grid.Row="1" Minimum="70" Maximum="140"
-                                    VerticalAlignment="Center"
-                                    IsSnapToTickEnabled="True" TickFrequency="5"
-                                    TickPlacement="None"
-                                    ValueChanged="OnTileScaleChanged"
-                                    Loaded="OnSliderLoaded" />
+                            <Border Width="40" Height="40" CornerRadius="12" Background="#286C8CFF">
+                                <TextBlock Text="&#xE713;" FontFamily="{StaticResource SegoeFluent}"
+                                           Foreground="#D8FFFFFF" FontSize="16" FontWeight="Light"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Launchpad Settings" FontSize="21" FontWeight="SemiBold" Foreground="White" />
+                                <TextBlock Text="Changes are saved automatically" FontSize="11" Foreground="#78FFFFFF" />
+                            </StackPanel>
                         </Grid>
 
-                        <TextBlock Text="Open shortcut (e.g. Ctrl+Alt+L)" Foreground="#9AA0AE"
-                                   FontSize="12" Margin="0,18,0,6" />
-                        <ui:TextBox x:Name="HotKeyBox" Height="36" FontSize="14"
-                                    PlaceholderText="Press keys..."
-                                    VerticalContentAlignment="Center"
-                                    KeyDown="OnHotKeyBoxKeyDown" LostFocus="OnHotKeyBoxCommit" />
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <Grid>
+                                    <StackPanel>
+                                        <TextBlock Text="HOT CORNER" Foreground="#8FA6C8FF"
+                                                   FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Text="Open Launchpad by touching a screen corner"
+                                                   Foreground="#AFFFFFFF" FontSize="12" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <ui:ToggleSwitch x:Name="HotCornerToggle"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                     Checked="OnHotCornerToggled" Unchecked="OnHotCornerToggled" />
+                                </Grid>
+                                <Border Width="180" Height="84" Margin="0,14,0,0"
+                                        HorizontalAlignment="Center" CornerRadius="13"
+                                        Background="#09000000" BorderBrush="#40FFFFFF" BorderThickness="2">
+                                    <Grid>
+                                        <Border Margin="12" CornerRadius="7" Background="#08FFFFFF"
+                                                BorderBrush="#16FFFFFF" BorderThickness="1">
+                                            <TextBlock Text="Choose the corner&#x0a;that opens Launchpad"
+                                                       FontSize="9.5" Foreground="#78FFFFFF"
+                                                       TextAlignment="Center" TextWrapping="Wrap"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <Button x:Name="TopLeftCornerButton" Tag="TopLeft" Click="OnCornerClick"
+                                                Style="{StaticResource CornerChoiceButtonStyle}"
+                                                Width="30" Height="30" Margin="-2" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                            <TextBlock Text="↖" FontSize="15" />
+                                        </Button>
+                                        <Button x:Name="TopRightCornerButton" Tag="TopRight" Click="OnCornerClick"
+                                                Style="{StaticResource CornerChoiceButtonStyle}"
+                                                Width="30" Height="30" Margin="-2" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                            <TextBlock Text="↗" FontSize="15" />
+                                        </Button>
+                                        <Button x:Name="BottomLeftCornerButton" Tag="BottomLeft" Click="OnCornerClick"
+                                                Style="{StaticResource CornerChoiceButtonStyle}"
+                                                Width="30" Height="30" Margin="-2" HorizontalAlignment="Left" VerticalAlignment="Bottom">
+                                            <TextBlock Text="↙" FontSize="15" />
+                                        </Button>
+                                        <Button x:Name="BottomRightCornerButton" Tag="BottomRight" Click="OnCornerClick"
+                                                Style="{StaticResource CornerChoiceButtonStyle}"
+                                                Width="30" Height="30" Margin="-2" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                            <TextBlock Text="↘" FontSize="15" />
+                                        </Button>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="ICON SIZE" Foreground="#8FA6C8FF" FontSize="11" FontWeight="SemiBold" />
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock x:Name="GridSizePopup" HorizontalAlignment="Left"
+                                               Foreground="White" FontSize="13" FontWeight="SemiBold"
+                                               Margin="0,0,0,5" IsHitTestVisible="False" />
+                                    <Slider x:Name="TileScaleSlider" Grid.Row="1" Minimum="70" Maximum="140"
+                                            VerticalAlignment="Center" IsSnapToTickEnabled="True" TickFrequency="5"
+                                            TickPlacement="None" ValueChanged="OnTileScaleChanged"
+                                            Loaded="OnSliderLoaded" />
+                                </Grid>
+                                <Grid Margin="0,3,0,0">
+                                    <TextBlock Text="Compact" Foreground="#68FFFFFF" FontSize="10" />
+                                    <TextBlock Text="Large" Foreground="#68FFFFFF" FontSize="10" HorizontalAlignment="Right" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="KEYBOARD SHORTCUT" Foreground="#8FA6C8FF" FontSize="11" FontWeight="SemiBold" />
+                                <TextBlock Text="Press a key combination to open Launchpad from anywhere"
+                                           Foreground="#AFFFFFFF" FontSize="12" Margin="0,4,0,10" />
+                                <ui:TextBox x:Name="HotKeyBox" Height="40" FontSize="14"
+                                            PlaceholderText="Press keys, for example Ctrl+Alt+L"
+                                            VerticalContentAlignment="Center"
+                                            KeyDown="OnHotKeyBoxKeyDown" LostFocus="OnHotKeyBoxCommit" />
+                            </StackPanel>
+                        </Border>
 
                         <ui:Button x:Name="DoneButton" Content="Done" Click="OnCloseSettings" Cursor="Hand"
-                                   Width="110" Height="36" Margin="0,24,0,0" HorizontalAlignment="Right"
+                                   Width="116" Height="38" Margin="0,8,0,0" HorizontalAlignment="Right"
                                    Appearance="Primary" FontWeight="SemiBold" />
                     </StackPanel>
                 </Border>

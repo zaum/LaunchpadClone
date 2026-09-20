@@ -114,12 +114,56 @@ public partial class MainWindow : INotifyPropertyChanged
     public sealed class GroupRow : INotifyPropertyChanged, ITileRow
     {
         private bool _showRemoveBadge;
+        private bool _isExpanded;
+        private double _expandedWidth;
+        private double _expandedHeight;
+        private int _expandedSlotCount = 4;
 
         public GroupRow(AppGroup group) => Group = group;
 
         public AppGroup Group { get; }
 
         public string DisplayName => Group.Name;
+
+        public ObservableCollection<AppRow> Members { get; } = new();
+
+        public double ExpandedWidth
+        {
+            get => _expandedWidth;
+            private set
+            {
+                _expandedWidth = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ExpandedWidth)));
+            }
+        }
+
+        public double ExpandedHeight
+        {
+            get => _expandedHeight;
+            private set
+            {
+                _expandedHeight = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ExpandedHeight)));
+            }
+        }
+
+        public int ExpandedSlotCount
+        {
+            get => _expandedSlotCount;
+            private set => _expandedSlotCount = value;
+        }
+
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set
+            {
+                if (_isExpanded == value)
+                    return;
+                _isExpanded = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExpanded)));
+            }
+        }
 
         // Indexer bindings refresh together via the "Item[]" notification.
         public ImageSource?[] Previews { get; } = new ImageSource?[9];
@@ -129,6 +173,29 @@ public partial class MainWindow : INotifyPropertyChanged
             for (var i = 0; i < Previews.Length; i++)
                 Previews[i] = i < icons.Count ? icons[i] : null;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        }
+
+        public void SetMembers(IReadOnlyList<AppRow> members)
+        {
+            Members.Clear();
+            foreach (var member in members)
+                Members.Add(member);
+        }
+
+        public void UpdateExpandedLayout(double tileWidth, double iconSize)
+        {
+            var count = Math.Max(1, Members.Count);
+            var columns = count <= 4
+                ? 2
+                : Math.Min(4, (int)Math.Ceiling(Math.Sqrt(count)));
+            var memberRows = (int)Math.Ceiling(count / (double)columns);
+            var occupiedRows = Math.Max(2, memberRows + 1); // title + full-size icon rows
+            var cellHeight = iconSize + 52;
+            // Include the folder's horizontal padding and every member's
+            // margin so two full-size icons never wrap into one column.
+            ExpandedWidth = columns * (tileWidth + 8) + 36;
+            ExpandedHeight = occupiedRows * cellHeight - 24;
+            ExpandedSlotCount = columns * occupiedRows;
         }
 
         // ✕ badge in jiggle mode (delete group).
@@ -172,8 +239,12 @@ public partial class MainWindow : INotifyPropertyChanged
 
     // Paging state: one page slice at a time, flipped by wheel, drag, keys.
     private List<ITileRow> _filtered = new();
+    // Kept as one stable ItemsSource so a reorder can move the existing WPF
+    // containers instead of rebuilding every tile template on every step.
+    private readonly ObservableCollection<ITileRow> _visibleTiles = new();
     private int _pageIndex;
     private int _pageSize = 24;
+    private bool _pageAnimationRunning;
     private System.Windows.Point? _dragOrigin;
     private bool _dragConsumed;
 
@@ -190,15 +261,18 @@ public partial class MainWindow : INotifyPropertyChanged
     private int _dragTargetIndex = -1;
     private long _lastReorderMs;
 
-    // Hover-to-group: when the ghost rests over another tile, a timer folds
-    // them into a group without needing a drop (macOS hover-create).
-    private DispatcherTimer? _hoverGroupTimer;
+    // The tile currently offered as a drop target. Group creation itself only
+    // happens on mouse-up; hovering is visual feedback, never an action.
     private ITileRow? _hoverGroupTarget;
     // The tile currently pressed by the hovering ghost (drop feedback).
     private ListBoxItem? _hoverHighlightContainer;
-    // Hover-to-group delay — matches macOS Launchpad's ~0.5 s hold before
-    // the target tile "compresses" and the folder forms on release.
-    private const double HoverGroupDelayMs = 500;
+    // Dragging to a page edge arms one deliberate page flip. The pointer
+    // must remain there briefly, then leave the edge before another flip can
+    // be armed. This prevents a single drag from racing across every page.
+    private DispatcherTimer? _edgePageTimer;
+    private int _edgePageDirection;
+    private bool _edgePageTriggered;
+    private const double EdgePageDelayMs = 600;
 
     // Jiggle (uninstall) mode + the long-press that arms it.
     private bool _jiggleMode;
@@ -245,30 +319,28 @@ public partial class MainWindow : INotifyPropertyChanged
         _watcher = new AppWatcher(_discovery);
 
         InitializeComponent();
+        AppsList.ItemsSource = _visibleTiles;
 
         // Gestures and overlay controls.
         // Single click launches (macOS style) via OnMouseLeftButtonUp —
         // no DoubleClick handler on purpose: it would fire a second launch.
         AppsList.SizeChanged += (_, _) => RecomputeLayout();
-        // The folder name commits ONLY on Enter — clicking away just returns
-        // to the grid view without renaming (macOS-like explicit commit).
-        GroupNameBox.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter)
-            {
-                CommitGroupName();
-                CloseGroup();
-                e.Handled = true;
-            }
-        };
 
         SearchBox.TextChanged += (_, _) => ApplyFilter();
         Loaded += OnLoaded;
         Closed += (_, _) => App.SettingsChanged -= OnAppSettingsChanged;
-        // Alt+Tab away (or any focus loss) dismisses the overlay like a click
-        // outside would — the window is fullscreen Topmost, so "outside"
-        // clicks land on empty area, but focus loss needs this handler.
-        Deactivated += (_, _) => Dismiss();
+        // Normal focus loss dismisses the launcher. In uninstall mode an
+        // external uninstaller may take focus; keep the launcher alive and
+        // move it behind that window so the user can return to the same view.
+        Deactivated += (_, _) =>
+        {
+            if (_jiggleMode)
+            {
+                Topmost = false;
+                return;
+            }
+            Dismiss();
+        };
 
         App.SettingsChanged += OnAppSettingsChanged;
         ApplySettings(App.Settings);
@@ -296,6 +368,7 @@ public partial class MainWindow : INotifyPropertyChanged
     protected override void OnActivated(EventArgs e)
     {
         base.OnActivated(e);
+        Topmost = true;
         Dispatcher.BeginInvoke(new Action(() =>
         {
             SearchBox.Focus();
@@ -308,6 +381,7 @@ public partial class MainWindow : INotifyPropertyChanged
         _hotKeyTimer?.Stop();
         _hotKeyTimer = null;
         _holdTimer?.Stop();
+        StopEdgePageFlip(resetTrigger: true);
         _iconCts?.Cancel();
         _iconCts?.Dispose();
         _iconCts = null;
@@ -359,6 +433,8 @@ public partial class MainWindow : INotifyPropertyChanged
         TileWidth = Math.Round(134 * scale);
         TileIconSize = Math.Round(84 * scale);
         LabelMaxWidth = TileWidth - 12;
+        foreach (var groupRow in _groupRows)
+            groupRow.UpdateExpandedLayout(TileWidth, TileIconSize);
         if (AppsList is not null)
             RecomputeLayout();
 
@@ -369,6 +445,8 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (HotCornerToggle is not null)
                 HotCornerToggle.IsChecked = settings.HotCornerEnabled;
+            if (TopLeftCornerButton is not null)
+                UpdateCornerSelection(settings.HotCorner);
             if (TileScaleSlider is not null)
                 TileScaleSlider.Value = scale * 100.0;
             if (HotKeyBox is not null)
@@ -591,17 +669,33 @@ public partial class MainWindow : INotifyPropertyChanged
         if (_pageSize <= 0)
             _pageSize = 24;
 
-        var pageCount = Math.Max(1, (int)Math.Ceiling(_filtered.Count / (double)_pageSize));
+        var extraGroupSlots = _openGroup is null ? 0 : _openGroup.ExpandedSlotCount - 1;
+        var occupiedSlots = _filtered.Count + extraGroupSlots;
+        var pageCount = Math.Max(1, (int)Math.Ceiling(occupiedSlots / (double)_pageSize));
         if (_pageIndex >= pageCount)
             _pageIndex = pageCount - 1;
 
         var source = _reorderPreview ?? _filtered;
+        var pageStart = _pageIndex * _pageSize;
         var slice = source
-            .Skip(_pageIndex * _pageSize)
+            .Skip(pageStart)
             .Take(_pageSize)
             .ToList();
+        if (_openGroup is not null && slice.Contains(_openGroup))
+        {
+            // Keep the expanded folder at its original list position and push
+            // ordinary tiles off the page to pay for its additional cells.
+            for (var i = 0; i < extraGroupSlots && slice.Count > 1; i++)
+            {
+                var removeAt = slice.Count - 1;
+                if (ReferenceEquals(slice[removeAt], _openGroup))
+                    removeAt--;
+                if (removeAt >= 0)
+                    slice.RemoveAt(removeAt);
+            }
+        }
 
-        AppsList.ItemsSource = slice;
+        SyncVisibleTiles(slice);
         AppsList.SelectedIndex = -1;
 
         UpdatePageDots(pageCount);
@@ -643,10 +737,68 @@ public partial class MainWindow : INotifyPropertyChanged
         var travel = Math.Min(360, Math.Max(160, AppsList.ActualWidth * 0.18));
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
+        _pageAnimationRunning = true;
         PageSlide.BeginAnimation(TranslateTransform.XProperty, null);
         PageSlide.X = direction * travel;
-        PageSlide.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(0, TimeSpan.FromMilliseconds(380)) { EasingFunction = ease });
+        // The page is static during a flip. Rasterizing it once lets the
+        // compositor move one texture instead of repainting every tile.
+        AppsList.CacheMode = new BitmapCache { RenderAtScale = 1.0 };
+        var animation = new DoubleAnimation(0, TimeSpan.FromMilliseconds(300))
+        {
+            EasingFunction = ease,
+            FillBehavior = FillBehavior.Stop
+        };
+        animation.Completed += (_, _) =>
+        {
+            PageSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            PageSlide.X = 0;
+            AppsList.CacheMode = null;
+            _pageAnimationRunning = false;
+            _ = ExtractVisibleIconsAsync();
+        };
+
+        // Let the newly selected page finish layout before the animation is
+        // clocked. This prevents its first frame from doing layout and paint
+        // work while it is already moving.
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            AppsList.UpdateLayout();
+            PageSlide.BeginAnimation(
+                TranslateTransform.XProperty,
+                animation,
+                HandoffBehavior.SnapshotAndReplace);
+        }), DispatcherPriority.Render);
+    }
+
+    private void SyncVisibleTiles(IReadOnlyList<ITileRow> desired)
+    {
+        // Preserve containers whenever the same items remain visible. In the
+        // common drag-reorder case this reduces a full page rebuild to moves.
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (i < _visibleTiles.Count && ReferenceEquals(_visibleTiles[i], desired[i]))
+                continue;
+
+            var existing = -1;
+            for (var j = i + 1; j < _visibleTiles.Count; j++)
+            {
+                if (ReferenceEquals(_visibleTiles[j], desired[i]))
+                {
+                    existing = j;
+                    break;
+                }
+            }
+
+            if (existing >= 0)
+                _visibleTiles.Move(existing, i);
+            else if (i < _visibleTiles.Count)
+                _visibleTiles[i] = desired[i];
+            else
+                _visibleTiles.Add(desired[i]);
+        }
+
+        while (_visibleTiles.Count > desired.Count)
+            _visibleTiles.RemoveAt(_visibleTiles.Count - 1);
     }
 
     // Tile cell footprint must match the template (tile width + 8px side
@@ -684,21 +836,23 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void NextPage()
     {
+        if (_pageAnimationRunning)
+            return;
         var pageCount = Math.Max(1, (int)Math.Ceiling(_filtered.Count / (double)_pageSize));
         if (_pageIndex >= pageCount - 1)
             return;
         _pageIndex++;
         RenderPage(1);
-        _ = ExtractVisibleIconsAsync();
     }
 
     private void PreviousPage()
     {
+        if (_pageAnimationRunning)
+            return;
         if (_pageIndex <= 0)
             return;
         _pageIndex--;
         RenderPage(-1);
-        _ = ExtractVisibleIconsAsync();
     }
 
     // Wheel flips pages like a book: down = right/next, up = left/previous.
@@ -825,9 +979,20 @@ public partial class MainWindow : INotifyPropertyChanged
         return null;
     }
 
+    private static AppRow? FindInlineGroupMember(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is FrameworkElement { Tag: "InlineGroupMember", DataContext: AppRow row })
+                return row;
+        }
+        return null;
+    }
+
     // ── Mouse handling: drag, jiggle, reorder ───────────────────────
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        StopEdgePageFlip(resetTrigger: true);
         if (SettingsOverlay.Visibility == Visibility.Visible)
             return;
 
@@ -851,8 +1016,7 @@ public partial class MainWindow : INotifyPropertyChanged
 
         if (_openGroup is not null)
         {
-            if (FindMemberContainer(e.OriginalSource as DependencyObject) is { } member
-                && member.DataContext is AppRow groupTile)
+            if (FindInlineGroupMember(e.OriginalSource as DependencyObject) is { } groupTile)
             {
                 // Custom mouse-move/up drag (ghost + placeholder). Do NOT start
                 // a blocking Ole DoDragDrop here: it suppresses MouseMove/MouseUp
@@ -998,10 +1162,6 @@ public partial class MainWindow : INotifyPropertyChanged
     // Enter launches the first visible tile (selection itself is never shown).
     private ITileRow? FirstVisibleTile()
     {
-        if (_openGroup is not null && GroupMembers.ItemsSource is System.Collections.IEnumerable members)
-            foreach (var m in members)
-                if (m is ITileRow t)
-                    return t;
         return _filtered.FirstOrDefault(t => IsOnCurrentPage(t));
     }
 
@@ -1029,39 +1189,21 @@ public partial class MainWindow : INotifyPropertyChanged
     }
 
     // ── Group (folder) operations ─────────────────────────────────
-    // macOS behavior: the backdrop stays blurred (an extra dim fades in),
-    // the folder is a lighter rounded card that zooms open with a slight
-    // overshoot while its member icons slide up into place.
-    private void OpenGroup(GroupRow gr)
+    // A folder expands in place inside the main WrapPanel. Its larger desired
+    // size participates in layout, so later tiles naturally move around it.
+    private void OpenGroup(GroupRow gr, System.Windows.Point? preferredCenter = null)
     {
+        if (_openGroup is not null && !ReferenceEquals(_openGroup, gr))
+            _openGroup.IsExpanded = false;
         _openGroup = gr;
-        var memberRows = new List<AppRow>();
-        foreach (var id in gr.Group.MemberIds)
-            if (_rowsById.TryGetValue(id, out var r))
-                memberRows.Add(r);
-        GroupMembers.ItemsSource = memberRows;
-        GroupMembers.SelectedIndex = -1;
-        foreach (var row in memberRows)
-            row.ShowRemoveBadge = true;
-        GroupNameBox.Text = gr.Group.Name;
-        // macOS behavior: the folder panel pops up AT the folder tile's spot.
-        // The card must be measurable: make the overlay visible but fully
-        // transparent first (Collapsed elements report no size), position,
-        // then run the open animation.
-        GroupOverlay.Opacity = 0;
-        GroupOverlay.Visibility = Visibility.Visible;
-        GroupOverlay.UpdateLayout();
-        PositionGroupCard(gr);
-        AnimateGroupOpen();
-        // The name field is editable right away (macOS: rename inline in the
-        // open folder), committed on Enter.
-        Dispatcher.BeginInvoke(new Action(() => Keyboard.Focus(GroupNameBox)),
-            DispatcherPriority.Input);
+        gr.IsExpanded = true;
+        GroupOverlay.Visibility = Visibility.Collapsed;
+        RenderPage(0);
     }
 
     // Places the folder card near its tile: measured tile center in window
     // coordinates, clamped so the card (measured after layout) stays on screen.
-    private void PositionGroupCard(GroupRow gr)
+    private void PositionGroupCard(GroupRow gr, System.Windows.Point? preferredCenter = null)
     {
         GroupCard.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
         var cardW = Math.Min(GroupCard.MaxWidth, GroupCard.DesiredSize.Width);
@@ -1070,7 +1212,12 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
 
         double x, y;
-        if (AppsList.ItemContainerGenerator.ContainerFromItem(gr) is ListBoxItem c)
+        if (preferredCenter is { } anchor)
+        {
+            x = anchor.X - cardW / 2;
+            y = anchor.Y - cardH / 2;
+        }
+        else if (AppsList.ItemContainerGenerator.ContainerFromItem(gr) is ListBoxItem c)
         {
             var p = c.TranslatePoint(
                 new System.Windows.Point(c.ActualWidth / 2, c.ActualHeight / 2), this);
@@ -1092,12 +1239,11 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void CloseGroup(bool relaunchFilter = true)
     {
-        if (_openGroup is not null && GroupMembers.ItemsSource is List<AppRow> members)
-            foreach (var row in members)
-                row.ShowRemoveBadge = false;
+        if (_openGroup is not null)
+            _openGroup.IsExpanded = false;
         _openGroup = null;
-        if (GroupOverlay.Visibility == Visibility.Visible)
-            AnimateGroupClose();
+        GroupOverlay.Visibility = Visibility.Collapsed;
+        ScrimDim.Opacity = 0;
         if (relaunchFilter)
             ApplyFilter(true);
     }
@@ -1158,7 +1304,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (name.Length > 0)
             _openGroup.Group.Name = name;
         _openGroup.NotifyNameChanged();
-                        PersistGroups();
+        PersistGroups();
     }
 
     private void RebuildGroupRows()
@@ -1174,9 +1320,18 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         foreach (var gr in _groupRows)
         {
+            var members = new List<AppRow>();
             var icons = new List<ImageSource?>();
             foreach (var id in gr.Group.MemberIds)
-                icons.Add(_rowsById.TryGetValue(id, out var mr) ? mr.Icon : null);
+            {
+                if (_rowsById.TryGetValue(id, out var mr))
+                {
+                    members.Add(mr);
+                    icons.Add(mr.Icon);
+                }
+            }
+            gr.SetMembers(members);
+            gr.UpdateExpandedLayout(TileWidth, TileIconSize);
             gr.SetPreviews(icons);
         }
     }
@@ -1217,20 +1372,48 @@ public partial class MainWindow : INotifyPropertyChanged
     // in the full (filtered) tile list, so the dragged tile can be slotted in.
     private int ComputeDragTargetIndex(System.Windows.Point pos)
     {
-        if (AppsList.ActualWidth < 100)
+        if (AppsList.ActualWidth < 100 || AppsList.Items.Count == 0)
             return 0;
-        var cellW = GridCellWidth;
-        var rowH = GridCellHeight;
-        var cols = Math.Max(1, (int)(AppsList.ActualWidth / cellW));
-        var usedW = cols * cellW;
-        var leftOffset = Math.Max(0.0, (AppsList.ActualWidth - usedW) / 2);
-        var col = (int)Math.Floor(((double)pos.X - leftOffset) / cellW);
-        var row = (int)Math.Floor((double)pos.Y / rowH);
-        col = Math.Max(0, Math.Min(cols - 1, col));
-        row = Math.Max(0, row);
-        var pageSize = Math.Max(1, _pageSize);
-        var local = Math.Max(0, Math.Min(pageSize - 1, row * cols + col));
-        return Math.Max(0, Math.Min(_filtered.Count - 1, _pageIndex * pageSize + local));
+
+        // Use the real arranged containers rather than theoretical grid math.
+        // Folder margins and expanded tiles can change actual positions, and
+        // the placeholder must open exactly beside the visual under the cursor.
+        ITileRow? closest = null;
+        var bestScore = double.PositiveInfinity;
+        foreach (var item in AppsList.Items.OfType<ITileRow>())
+        {
+            if (AppsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+            System.Windows.Point center;
+            try
+            {
+                center = container.TranslatePoint(
+                    new System.Windows.Point(container.ActualWidth / 2, container.ActualHeight / 2),
+                    AppsList);
+            }
+            catch
+            {
+                continue;
+            }
+
+            var normalizedX = (pos.X - center.X) / Math.Max(1, container.ActualWidth);
+            var normalizedY = (pos.Y - center.Y) / Math.Max(1, container.ActualHeight);
+            var score = normalizedX * normalizedX + normalizedY * normalizedY;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                closest = item;
+            }
+        }
+
+        if (closest is not null)
+        {
+            var index = _filtered.IndexOf(closest);
+            if (index >= 0)
+                return index;
+        }
+
+        return Math.Max(0, Math.Min(_filtered.Count - 1, _pageIndex * Math.Max(1, _pageSize)));
     }
 
     // Reorders the full list around where the cursor is and re-renders, with
@@ -1259,9 +1442,6 @@ public partial class MainWindow : INotifyPropertyChanged
     // fast drag cannot stack animations (that stacking was the stutter).
     private void RenderPageGlide()
     {
-        foreach (var item in AppsList.Items)
-            if (AppsList.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem old)
-                old.RenderTransform = null; // kill any still-running glide
         var before = new Dictionary<object, System.Windows.Point>();
         foreach (var item in AppsList.Items)
         {
@@ -1269,9 +1449,28 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 try { before[item] = c.TranslatePoint(new System.Windows.Point(c.ActualWidth / 2, c.ActualHeight / 2), AppsList); }
                 catch { /* container not yet laid out */ }
+                // Capture the currently displayed (possibly mid-animation)
+                // location first, then cancel the old clock. The next FLIP
+                // continues from that exact visual position without a snap.
+                c.RenderTransform = null;
             }
         }
-        RenderPage(0);
+        var pageStart = _pageIndex * Math.Max(1, _pageSize);
+        var desired = (_reorderPreview ?? _filtered)
+            .Skip(pageStart)
+            .Take(_pageSize)
+            .ToList();
+
+        // A drag normally changes one item's index. ObservableCollection.Move
+        // keeps all generated containers and their cached tile visuals alive.
+        var dragged = AnyDragTile;
+        var oldIndex = dragged is null ? -1 : _visibleTiles.IndexOf(dragged);
+        var newIndex = dragged is null ? -1 : desired.IndexOf(dragged);
+        if (oldIndex >= 0 && newIndex >= 0 && oldIndex != newIndex)
+            _visibleTiles.Move(oldIndex, newIndex);
+        else
+            SyncVisibleTiles(desired);
+
         AppsList.UpdateLayout();
         var ease = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
         foreach (var item in AppsList.Items)
@@ -1314,6 +1513,7 @@ public partial class MainWindow : INotifyPropertyChanged
     // Drops every piece of drag state — used by Esc-cancel and mouse-up paths.
     private void ResetDragState()
     {
+        StopEdgePageFlip(resetTrigger: true);
         ClearDragPreview();
         _dragTile = null;
         _dragGroupTile = null;
@@ -1352,7 +1552,6 @@ public partial class MainWindow : INotifyPropertyChanged
         if (FindRowFromSender(sender) is { } row)
         {
             UninstallerService.LaunchUninstall(row.App);
-            ExitJiggle();
         }
     }
 
@@ -1418,7 +1617,8 @@ public partial class MainWindow : INotifyPropertyChanged
             {
                 var dd = Math.Max(Math.Abs((double)(pos.X - _tileDragStart.X)),
                                   Math.Abs((double)(pos.Y - _tileDragStart.Y)));
-                if (dd <= 14)
+                var dragThreshold = _tileDragFromGroup ? 6 : 14;
+                if (dd <= dragThreshold)
                     return;
                 _tileDragArmed = true;
                 _tileDragStart = pos;
@@ -1466,25 +1666,69 @@ public partial class MainWindow : INotifyPropertyChanged
                 var target = ComputeDragTargetIndex(gridPos);
                 var now = Environment.TickCount64;
                 var home = _filtered.IndexOf(AnyDragTile);
-                if (target != _dragTargetIndex && target != home && now - _lastReorderMs >= 80)
+                if (target != _dragTargetIndex && target != home && now - _lastReorderMs >= 50)
                 {
                     _lastReorderMs = now;
                     _dragTargetIndex = target;
                     BuildReorderPreview();
                 }
             }
-                // Hover-to-group: resting the ghost on another tile for a
-                // moment folds them into a group (no drop needed).
+                // Show the potential folder target, but wait for mouse-up
+                // before creating or modifying a group.
                 if (_dragTile is not null)
-                    UpdateHoverGroupTimer(gridPos);
+                    UpdateGroupDropPreview(gridPos);
             }
 
-            var edgePos = e.GetPosition(AppsList);
-            if (edgePos.X < 24)
-                PreviousPage();
-            else if (edgePos.X > AppsList.ActualWidth - 24)
-                NextPage();
+            UpdateEdgePageFlip(e.GetPosition(AppsList));
         }
+    }
+
+    private void UpdateEdgePageFlip(System.Windows.Point position)
+    {
+        const double edgeWidth = 36;
+        var direction = position.X < edgeWidth
+            ? -1
+            : position.X > AppsList.ActualWidth - edgeWidth
+                ? 1
+                : 0;
+
+        if (direction == 0)
+        {
+            StopEdgePageFlip(resetTrigger: true);
+            return;
+        }
+
+        if (_edgePageTriggered || (_edgePageTimer is not null && _edgePageDirection == direction))
+            return;
+
+        StopEdgePageFlip(resetTrigger: false);
+        _edgePageDirection = direction;
+        _edgePageTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(EdgePageDelayMs)
+        };
+        _edgePageTimer.Tick += (_, _) =>
+        {
+            var flipDirection = _edgePageDirection;
+            StopEdgePageFlip(resetTrigger: false);
+            _edgePageTriggered = true;
+            if (!_tileDragArmed || AnyDragTile is null)
+                return;
+            if (flipDirection < 0)
+                PreviousPage();
+            else
+                NextPage();
+        };
+        _edgePageTimer.Start();
+    }
+
+    private void StopEdgePageFlip(bool resetTrigger)
+    {
+        _edgePageTimer?.Stop();
+        _edgePageTimer = null;
+        _edgePageDirection = 0;
+        if (resetTrigger)
+            _edgePageTriggered = false;
     }
 
     // True while the cursor sits in the middle ~62% of a tile cell: the user
@@ -1495,54 +1739,44 @@ public partial class MainWindow : INotifyPropertyChanged
     // away from under you).
     private bool IsHoveringTileCenter(System.Windows.Point gridPos)
     {
-        if (AppsList.ActualWidth < 100)
-            return false;
-        var cellW = GridCellWidth;
-        var cols = Math.Max(1, (int)(AppsList.ActualWidth / cellW));
-        var usedW = cols * cellW;
-        var leftOffset = Math.Max(0.0, (AppsList.ActualWidth - usedW) / 2);
-        var inCellX = (gridPos.X - leftOffset) % cellW;
-        if (inCellX < 0)
-            inCellX += cellW;
-        var inCellY = gridPos.Y % GridCellHeight;
-        if (inCellY < 0)
-            inCellY += GridCellHeight;
-        const double edge = 0.19; // outer 19% on each side = reorder zone
-        return inCellX > cellW * edge && inCellX < cellW * (1 - edge)
-            && inCellY > GridCellHeight * edge && inCellY < GridCellHeight * (1 - edge);
+        const double edge = 0.15;
+        foreach (var item in AppsList.Items.OfType<ITileRow>())
+        {
+            if (AppsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+            System.Windows.Point topLeft;
+            try { topLeft = container.TranslatePoint(new System.Windows.Point(), AppsList); }
+            catch { continue; }
+            var x = gridPos.X - topLeft.X;
+            var y = gridPos.Y - topLeft.Y;
+            if (x < 0 || y < 0 || x > container.ActualWidth || y > container.ActualHeight)
+                continue;
+            return x > container.ActualWidth * edge && x < container.ActualWidth * (1 - edge)
+                && y > container.ActualHeight * edge && y < container.ActualHeight * (1 - edge);
+        }
+        return false;
     }
 
-    // Hover-to-group: (re)arms a short timer while the ghost rests over a
-    // *different* tile (app OR existing folder); moving off it disarms the
-    // timer. When it elapses, the tiles fold into a group (or the dragged
-    // app flies into the hovered folder) immediately — no drop needed.
-    // While hovering, the target tile gently scales up ("press to accept"),
-    // exactly like macOS Launchpad's folder-create feedback.
-    private void UpdateHoverGroupTimer(System.Windows.Point gridPos)
+    // Hover only previews the potential group target. The actual create/add
+    // operation is performed by OnMouseLeftButtonUp after a deliberate drop.
+    private void UpdateGroupDropPreview(System.Windows.Point gridPos)
     {
         if (_dragTile is null || _tileDragFromGroup || _openGroup is not null)
         {
-            StopHoverGroupTimer();
+            ClearGroupDropPreview();
             return;
         }
-        var over = TileAtGridPoint(gridPos);
+        var over = IsHoveringTileCenter(gridPos) ? TileAtGridPoint(gridPos) : null;
         if (over is null)
         {
-            StopHoverGroupTimer();
+            ClearGroupDropPreview();
             return;
         }
-        if (ReferenceEquals(over, _hoverGroupTarget) && _hoverGroupTimer is not null)
-            return; // already counting down on this tile
-        StopHoverGroupTimer();
+        if (ReferenceEquals(over, _hoverGroupTarget))
+            return;
+        ClearGroupDropPreview();
         _hoverGroupTarget = over;
         HighlightHoverTarget(over, true);
-        _hoverGroupTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(HoverGroupDelayMs)
-        };
-        var target = over;
-        _hoverGroupTimer.Tick += (_, _) => FireHoverGroup(target);
-        _hoverGroupTimer.Start();
     }
 
     // The tile being dragged, whether it is an app or a whole folder.
@@ -1553,10 +1787,8 @@ public partial class MainWindow : INotifyPropertyChanged
     private static ImageSource? MakeGroupGhostImage(GroupRow? group)
         => group?.Previews.FirstOrDefault(p => p is not null);
 
-    private void StopHoverGroupTimer()
+    private void ClearGroupDropPreview()
     {
-        _hoverGroupTimer?.Stop();
-        _hoverGroupTimer = null;
         _hoverGroupTarget = null;
         HighlightHoverTarget(null, false);
     }
@@ -1576,7 +1808,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (AppsList.ItemContainerGenerator.ContainerFromItem(tile) is ListBoxItem container)
         {
             _hoverHighlightContainer = container;
-            AnimateTileScale(container, 1.12);
+            AnimateTileScale(container, 1.24);
         }
     }
 
@@ -1599,54 +1831,39 @@ public partial class MainWindow : INotifyPropertyChanged
     // it still occupies its old slot in ItemsSource during the preview).
     private ITileRow? TileAtGridPoint(System.Windows.Point gridPos)
     {
-        var targetIndex = ComputeDragTargetIndex(gridPos);
-        var pageStart = _pageIndex * Math.Max(1, _pageSize);
-        var local = targetIndex - pageStart;
-        if (AppsList.ItemsSource is System.Collections.IEnumerable items)
+        foreach (var item in AppsList.Items.OfType<ITileRow>())
         {
-            var i = 0;
-            foreach (var item in items)
-            {
-                if (i == local && item is ITileRow row && !ReferenceEquals(row, AnyDragTile))
-                    return row;
-                i++;
-            }
+            if (ReferenceEquals(item, AnyDragTile)
+                || AppsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+            System.Windows.Point topLeft;
+            try { topLeft = container.TranslatePoint(new System.Windows.Point(), AppsList); }
+            catch { continue; }
+            if (gridPos.X >= topLeft.X && gridPos.X <= topLeft.X + container.ActualWidth
+                && gridPos.Y >= topLeft.Y && gridPos.Y <= topLeft.Y + container.ActualHeight)
+                return item;
         }
         return null;
-    }
-
-    private void FireHoverGroup(ITileRow target)
-    {
-        StopHoverGroupTimer();
-        if (_dragTile is null || _tileDragFromGroup || _openGroup is not null)
-            return;
-        if (ReferenceEquals(target, _dragTile))
-            return;
-        var source = _dragTile;
-        ClearDragPreview();
-        _dragTile = null;
-        _tileDragArmed = false;
-        DragGhost.Visibility = Visibility.Collapsed;
-        switch (target)
-        {
-            case AppRow app:
-                CreateGroup(source, app);
-                break;
-            case GroupRow folder:
-                AddToGroup(folder, source);
-                ApplyFilter(true); // the dragged tile disappears into the folder
-                break;
-        }
     }
 
     // ── Drag: mouse-up (group create / add / remove / drop) ───────
     private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        StopEdgePageFlip(resetTrigger: true);
         var swiped = _dragConsumed;
         _dragConsumed = false;
         _dragOrigin = null;
         StopHoldTimer();
-        StopHoverGroupTimer();
+        ClearGroupDropPreview();
+
+        // Deletion mode is modal: clicking a tile never launches it, closes
+        // the window, or leaves stale drag state behind. Badge buttons still
+        // receive their Click event after this preview handler returns.
+        if (_jiggleMode)
+        {
+            ResetDragState();
+            return;
+        }
 
         // A just-closed ContextMenu mirrors a mouse-up onto the tile — never
         // treat that as a launch/open click (Open-folder bug).
@@ -1654,6 +1871,16 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             _ignoreNextClick = false;
             return;
+        }
+
+        // Some nested controls can coalesce intermediate MouseMove events.
+        // Re-evaluate displacement on release so an intended member drag is
+        // never mistaken for a click that launches the application.
+        if (!_tileDragArmed && _tileDragFromGroup && AnyDragTile is not null)
+        {
+            var releasePosition = e.GetPosition(this);
+            if ((releasePosition - _tileDragStart).Length > 6)
+                _tileDragArmed = true;
         }
 
         if (_tileDragArmed && AnyDragTile is not null)
@@ -1718,14 +1945,11 @@ public partial class MainWindow : INotifyPropertyChanged
         if (IsWithinControl(clickSource))
             return;
 
-        // Inside the open folder: member icons launch, clicking the empty
-        // backdrop beside the card just steps back to the grid view — the
-        // launcher itself stays open (dismissal is for the grid, not the
-        // folder you are actively managing).
+        // Inside an expanded inline folder, member icons launch normally;
+        // clicking anywhere else collapses the folder in place.
         if (_openGroup is not null)
         {
-            if (FindMemberContainer(clickSource) is { } member
-                && member.DataContext is AppRow groupApp)
+            if (FindInlineGroupMember(clickSource) is { } groupApp)
                 TryLaunch(groupApp);
             else
                 CloseGroup();
@@ -1735,7 +1959,13 @@ public partial class MainWindow : INotifyPropertyChanged
         if (FindTileContainer(clickSource) is { } container)
         {
             if (container.DataContext is GroupRow g)
-                OpenGroup(g);
+            {
+                if (ReferenceEquals(_openGroup, g))
+                    CloseGroup();
+                else
+                    OpenGroup(g);
+                return;
+            }
             else if (container.DataContext is AppRow app)
             {
                 TryLaunch(app);
@@ -1822,6 +2052,7 @@ public partial class MainWindow : INotifyPropertyChanged
         if (_applyingSettings)
             return;
         App.Settings.HotCornerEnabled = HotCornerToggle.IsChecked == true;
+        UpdateCornerSelection(App.Settings.HotCorner);
         CommitSettings();
     }
 
@@ -1836,7 +2067,40 @@ public partial class MainWindow : INotifyPropertyChanged
             "BottomRight" => AppHotCorner.BottomRight,
             _ => App.Settings.HotCorner
         };
+        UpdateCornerSelection(App.Settings.HotCorner);
         CommitSettings();
+    }
+
+    private void UpdateCornerSelection(AppHotCorner selected)
+    {
+        if (TopLeftCornerButton is null)
+            return;
+
+        var selectedBackground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x38, 0x6C, 0x8C, 0xFF));
+        var selectedBorder = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xA0, 0x7C, 0x9C, 0xFF));
+        var normalBackground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF));
+        var normalBorder = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
+        selectedBackground.Freeze();
+        selectedBorder.Freeze();
+        normalBackground.Freeze();
+        normalBorder.Freeze();
+
+        var choices = new (System.Windows.Controls.Button Button, AppHotCorner Corner)[]
+        {
+            (TopLeftCornerButton, AppHotCorner.TopLeft),
+            (TopRightCornerButton, AppHotCorner.TopRight),
+            (BottomLeftCornerButton, AppHotCorner.BottomLeft),
+            (BottomRightCornerButton, AppHotCorner.BottomRight)
+        };
+        var enabled = HotCornerToggle.IsChecked == true;
+        foreach (var (button, corner) in choices)
+        {
+            var isSelected = corner == selected;
+            button.Background = isSelected ? selectedBackground : normalBackground;
+            button.BorderBrush = isSelected ? selectedBorder : normalBorder;
+            button.Opacity = enabled ? 1.0 : 0.46;
+            button.IsEnabled = enabled;
+        }
     }
 
     private void OnTileScaleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1963,6 +2227,12 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
 
     private void CommitSettings() => App.SaveSettings(App.Settings);
 
+    private void OnSaveGroupName(object sender, RoutedEventArgs e)
+    {
+        CommitGroupName();
+        GroupMembers.Focus();
+    }
+
     private static string HotKeyLabel(Key key) => key switch
     {
         Key.Enter => "Enter",
@@ -1980,13 +2250,15 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
             if (_tileDragArmed || AnyDragTile is not null)
             {
                 StopHoldTimer();
-                StopHoverGroupTimer();
+                ClearGroupDropPreview();
                 ResetDragState();
             }
             else if (SettingsOverlay.Visibility == Visibility.Visible)
                 OnCloseSettings(sender, e);
             else if (_openGroup is not null)
                 CloseGroup();
+            else if (_jiggleMode)
+                ExitJiggle();
             else if (SearchBox.Text.Length > 0)
                 SearchBox.Text = "";
             else
@@ -1996,9 +2268,16 @@ private void OnOpenAppFolder(object sender, RoutedEventArgs e)
         }
         if (e.Key == Key.Enter)
         {
-            // Enter inside the open folder just closes it back to the grid —
-            // the first visible tile underneath must never auto-launch.
-            if (_openGroup is not null)
+            // The window-level preview event runs before TextBox.KeyDown, so
+            // commit here when Enter is pressed in the editable group title.
+            if (_openGroup is not null && GroupNameBox.IsKeyboardFocusWithin)
+            {
+                CommitGroupName();
+                CloseGroup();
+            }
+            // Enter elsewhere inside an open folder closes it back to the
+            // grid; it must never launch the first tile underneath.
+            else if (_openGroup is not null)
                 CloseGroup();
             else
                 LaunchSelected();
