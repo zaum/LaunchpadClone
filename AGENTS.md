@@ -7,8 +7,7 @@ Beginner-friendly tone: explain jargon, add context. Code comments/README stay t
 - `src/LaunchpadClone.Core/` - UI-free core: Models, Discovery, Native, Icons, Cache, Launch, Search (FuzzySearch), Groups (AppGroup/AppGroupStore).
 - `src/LaunchpadClone.UI/` - WPF shell (fullscreen blurred overlay, top-center fuzzy search, paged icon grid with slide animation, drag-to-group folders, single-click/Enter launch, jiggle-uninstall, drag-out of groups, page indicator dots, settings gear: hot-corner / grid-size slider / global open-hotkey, drag-reorder order persistence, watcher deltas, 10-min full rescan). Consumes Core as-is.
 - `tools/LaunchpadClone.Poc/` - console harness (`dotnet run` on Windows).
-- `files/` - LEGACY phase-1 drop. Reference only, NOT built. Do not edit; port fixes into `src/` instead.
-- Build only `src/` + `tools/`. Never add `files/*.cs` to a csproj.
+- Build only `src/` + `tools/`.
 
 ## Build
 - Target: `net10.0-windows10.0.19041.0`, `EnableWindowsTargeting=true` (Linux edit safe).

@@ -15,6 +15,34 @@ namespace LaunchpadClone.Core.Launch;
 [SupportedOSPlatform("windows")]
 public static class UninstallerService
 {
+    private sealed record UninstallEntry(string DisplayName, string Command);
+
+    private static readonly Lazy<IReadOnlyList<UninstallEntry>> RegistryEntries =
+        new(LoadRegistryEntries, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool>
+        EligibilityCache = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Returns true only when Launchpad can identify a real uninstall route.
+    /// Store apps exposed by discovery are non-system packages; desktop apps
+    /// need either a matching registry entry or a nearby uninstaller.
+    /// </summary>
+    public static bool CanUninstall(AppItem app) =>
+        EligibilityCache.GetOrAdd(app.Id, _ => DetectCanUninstall(app));
+
+    private static bool DetectCanUninstall(AppItem app)
+    {
+        if (app.Kind == AppKind.Uwp)
+            return true;
+
+        var target = app.Kind == AppKind.Shortcut
+            ? ResolveShortcutTarget(app.TargetPath)
+            : app.TargetPath;
+        return FindRegistryUninstallString(app.DisplayName, target) is not null
+            || FindNearbyUninstaller(target) is not null;
+    }
+
     public static void LaunchUninstall(AppItem app)
     {
         if (app.Kind == AppKind.Uwp)
@@ -34,28 +62,15 @@ public static class UninstallerService
             return;
         }
 
-        var directory = target is null ? null : Path.GetDirectoryName(target);
-        if (directory is not null && Directory.Exists(directory))
+        var nearbyUninstaller = FindNearbyUninstaller(target);
+        if (nearbyUninstaller is not null)
         {
-            try
+            Process.Start(new ProcessStartInfo
             {
-                var unins = Directory.EnumerateFiles(directory, "*.exe")
-                    .FirstOrDefault(p => Path.GetFileName(p)
-                        .Contains("unins", StringComparison.OrdinalIgnoreCase));
-                if (unins is not null)
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = unins,
-                        UseShellExecute = true
-                    });
-                    return;
-                }
-            }
-            catch (Exception)
-            {
-                // unreadable directory — fall through to Settings
-            }
+                FileName = nearbyUninstaller,
+                UseShellExecute = true
+            });
+            return;
         }
 
         OpenAppsSettings();
@@ -68,6 +83,33 @@ public static class UninstallerService
     }
     private static string? FindRegistryUninstallString(string displayName, string? targetPath)
     {
+        var needle = displayName.Trim().ToLowerInvariant();
+        if (needle.Length == 0)
+            return null;
+        // Strip the extension: registry DisplayNames never contain ".exe",
+        // so "code.exe" would never match "Visual Studio Code" otherwise.
+        var targetFile = targetPath is null
+            ? null
+            : Path.GetFileNameWithoutExtension(targetPath).ToLowerInvariant();
+
+        foreach (var entry in RegistryEntries.Value)
+        {
+            var nameLower = entry.DisplayName.ToLowerInvariant();
+            // Exact match wins. Substring matches require a meaningful needle
+            // so a short name cannot select an unrelated uninstall command.
+            var matches = nameLower.Equals(needle, StringComparison.Ordinal)
+                || (needle.Length >= 4 && nameLower.Contains(needle, StringComparison.Ordinal))
+                || (targetFile is not null && targetFile.Length >= 4
+                    && nameLower.Contains(targetFile, StringComparison.Ordinal));
+            if (matches)
+                return entry.Command;
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<UninstallEntry> LoadRegistryEntries()
+    {
         string[] keyPaths =
         [
             @"Software\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -79,14 +121,7 @@ public static class UninstallerService
             Microsoft.Win32.Registry.LocalMachine
         ];
 
-        var needle = displayName.Trim().ToLowerInvariant();
-        if (needle.Length == 0)
-            return null;
-        // Strip the extension: registry DisplayNames never contain ".exe",
-        // so "code.exe" would never match "Visual Studio Code" otherwise.
-        var targetFile = targetPath is null
-            ? null
-            : Path.GetFileNameWithoutExtension(targetPath).ToLowerInvariant();
+        var result = new List<UninstallEntry>();
 
         foreach (var root in roots)
         {
@@ -109,21 +144,10 @@ public static class UninstallerService
                             if (string.IsNullOrWhiteSpace(name))
                                 continue;
 
-                            var nameLower = name.ToLowerInvariant();
-                            // Exact match wins. Substring matches require a
-                            // meaningful needle (>= 4 chars) so "Mail" cannot
-                            // match "Gmail Notifier" and uninstall the wrong app.
-                            var matches = nameLower.Equals(needle, StringComparison.Ordinal)
-                                || (needle.Length >= 4 && nameLower.Contains(needle, StringComparison.Ordinal))
-                                || (targetFile is not null && targetFile.Length >= 4
-                                    && nameLower.Contains(targetFile, StringComparison.Ordinal));
-                            if (!matches)
-                                continue;
-
                             if (sub!.GetValue("UninstallString") is string str && str.Trim().Length > 0)
-                                return str;
-                            if (sub.GetValue("QuietUninstallString") is string quiet && quiet.Trim().Length > 0)
-                                return quiet;
+                                result.Add(new UninstallEntry(name, str));
+                            else if (sub.GetValue("QuietUninstallString") is string quiet && quiet.Trim().Length > 0)
+                                result.Add(new UninstallEntry(name, quiet));
                         }
                         catch (Exception)
                         {
@@ -146,7 +170,25 @@ public static class UninstallerService
             }
         }
 
-        return null;
+        return result;
+    }
+
+    private static string? FindNearbyUninstaller(string? targetPath)
+    {
+        var directory = targetPath is null ? null : Path.GetDirectoryName(targetPath);
+        if (directory is null || !Directory.Exists(directory))
+            return null;
+
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*.exe")
+                .FirstOrDefault(path => Path.GetFileName(path)
+                    .Contains("unins", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     // UninstallString values come in shapes like "\"C:\\...\\unins000.exe\""

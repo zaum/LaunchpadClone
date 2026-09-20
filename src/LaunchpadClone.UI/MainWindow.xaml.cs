@@ -43,6 +43,7 @@ public partial class MainWindow : INotifyPropertyChanged
         private bool _showRemoveBadge;
         private bool _showUninstallBadge;
         private bool _showAsPlaceholder;
+        private bool _isKeyboardSelected;
 
         public AppRow(AppItem app) => _app = app;
 
@@ -100,6 +101,12 @@ public partial class MainWindow : INotifyPropertyChanged
             set => SetField(ref _showUninstallBadge, value);
         }
 
+        public bool IsKeyboardSelected
+        {
+            get => _isKeyboardSelected;
+            set => SetField(ref _isKeyboardSelected, value);
+        }
+
         private void SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
         {
             field = value;
@@ -107,6 +114,18 @@ public partial class MainWindow : INotifyPropertyChanged
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
+    }
+
+    public sealed class GroupPageDot
+    {
+        public GroupPageDot(int index, bool isCurrent)
+        {
+            Index = index;
+            IsCurrent = isCurrent;
+        }
+
+        public int Index { get; }
+        public bool IsCurrent { get; }
     }
 
     // A user-created group rendered as a "folder" tile with a 3x3 mini
@@ -118,6 +137,10 @@ public partial class MainWindow : INotifyPropertyChanged
         private double _expandedWidth;
         private double _expandedHeight;
         private int _expandedSlotCount = 4;
+        private int _memberPageIndex;
+        private bool _isDropTarget;
+        private double _lastTileWidth;
+        private double _lastIconSize;
 
         public GroupRow(AppGroup group) => Group = group;
 
@@ -126,6 +149,31 @@ public partial class MainWindow : INotifyPropertyChanged
         public string DisplayName => Group.Name;
 
         public ObservableCollection<AppRow> Members { get; } = new();
+        public ObservableCollection<AppRow> VisibleMembers { get; } = new();
+        public ObservableCollection<GroupPageDot> MemberPages { get; } = new();
+
+        public const int MembersPerPage = 6;
+
+        public int MemberPageCount => Math.Max(1,
+            (int)Math.Ceiling(Members.Count / (double)MembersPerPage));
+
+        public int MemberPageIndex => _memberPageIndex;
+
+        public bool HasMultipleMemberPages => MemberPageCount > 1;
+
+        public AppRow? SelectedMember { get; private set; }
+
+        public bool IsDropTarget
+        {
+            get => _isDropTarget;
+            set
+            {
+                if (_isDropTarget == value)
+                    return;
+                _isDropTarget = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDropTarget)));
+            }
+        }
 
         public double ExpandedWidth
         {
@@ -177,17 +225,96 @@ public partial class MainWindow : INotifyPropertyChanged
 
         public void SetMembers(IReadOnlyList<AppRow> members)
         {
+            var selectedId = SelectedMember?.App.Id;
             Members.Clear();
             foreach (var member in members)
                 Members.Add(member);
+            _memberPageIndex = Math.Clamp(_memberPageIndex, 0, MemberPageCount - 1);
+            RebuildMemberPage();
+            if (selectedId is not null)
+            {
+                var selected = Members.FirstOrDefault(m => m.App.Id == selectedId);
+                if (selected is not null)
+                    SelectMember(selected);
+            }
+        }
+
+        public bool SetMemberPage(int pageIndex)
+        {
+            var next = Math.Clamp(pageIndex, 0, MemberPageCount - 1);
+            if (next == _memberPageIndex)
+                return false;
+            ClearMemberSelection();
+            _memberPageIndex = next;
+            RebuildMemberPage();
+            SelectVisibleMember(0);
+            return true;
+        }
+
+        public void ShowLastMemberPage()
+        {
+            _memberPageIndex = MemberPageCount - 1;
+            RebuildMemberPage();
+            SelectVisibleMember(Math.Max(0, VisibleMembers.Count - 1));
+        }
+
+        public void SelectVisibleMember(int index)
+        {
+            if (VisibleMembers.Count == 0)
+            {
+                ClearMemberSelection();
+                return;
+            }
+            index = Math.Clamp(index, 0, VisibleMembers.Count - 1);
+            SelectMember(VisibleMembers[index]);
+        }
+
+        public int SelectedVisibleMemberIndex() =>
+            SelectedMember is null ? -1 : VisibleMembers.IndexOf(SelectedMember);
+
+        public void ClearMemberSelection()
+        {
+            foreach (var member in Members)
+                member.IsKeyboardSelected = false;
+            SelectedMember = null;
+        }
+
+        private void SelectMember(AppRow member)
+        {
+            foreach (var item in Members)
+                item.IsKeyboardSelected = ReferenceEquals(item, member);
+            SelectedMember = member;
+        }
+
+        private void RebuildMemberPage()
+        {
+            VisibleMembers.Clear();
+            foreach (var member in Members
+                .Skip(_memberPageIndex * MembersPerPage)
+                .Take(MembersPerPage))
+            {
+                VisibleMembers.Add(member);
+            }
+
+            MemberPages.Clear();
+            for (var i = 0; i < MemberPageCount; i++)
+                MemberPages.Add(new GroupPageDot(i, i == _memberPageIndex));
+
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MemberPageCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MemberPageIndex)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasMultipleMemberPages)));
+            if (_lastTileWidth > 0 && _lastIconSize > 0)
+                UpdateExpandedLayout(_lastTileWidth, _lastIconSize);
         }
 
         public void UpdateExpandedLayout(double tileWidth, double iconSize)
         {
-            var count = Math.Max(1, Members.Count);
+            _lastTileWidth = tileWidth;
+            _lastIconSize = iconSize;
+            var count = Math.Max(1, Math.Min(Members.Count, MembersPerPage));
             var columns = count <= 4
                 ? 2
-                : Math.Min(4, (int)Math.Ceiling(Math.Sqrt(count)));
+                : 3;
             var memberRows = (int)Math.Ceiling(count / (double)columns);
             var occupiedRows = Math.Max(2, memberRows + 1); // title + full-size icon rows
             var cellHeight = iconSize + 52;
@@ -197,8 +324,10 @@ public partial class MainWindow : INotifyPropertyChanged
             // by its border. A little spare width also absorbs DPI rounding,
             // preventing the final member from wrapping into a clipped row.
             ExpandedWidth = columns * (tileWidth + 8) + 42;
-            ExpandedHeight = occupiedRows * cellHeight - 24;
-            ExpandedSlotCount = columns * occupiedRows;
+            ExpandedHeight = occupiedRows * cellHeight - 24
+                + (HasMultipleMemberPages ? 24 : 0);
+            ExpandedSlotCount = columns * Math.Max(2,
+                (int)Math.Ceiling(ExpandedHeight / cellHeight));
         }
 
         // ✕ badge in jiggle mode (delete group).
@@ -234,6 +363,7 @@ public partial class MainWindow : INotifyPropertyChanged
     private readonly object _iconLock = new();
     private List<AppItem> _allApps = new();
     private CancellationTokenSource? _iconCts;
+    private CancellationTokenSource? _uninstallEligibilityCts;
 
     private List<AppGroup> _groups = new();
     private readonly List<GroupRow> _groupRows = new();
@@ -248,8 +378,11 @@ public partial class MainWindow : INotifyPropertyChanged
     private int _pageIndex;
     private int _pageSize = 24;
     private bool _pageAnimationRunning;
+    private ITileRow? _keyboardSelectedTile;
     private System.Windows.Point? _dragOrigin;
     private bool _dragConsumed;
+    private HwndSource? _windowSource;
+    private int _horizontalWheelDelta;
 
     // Tile-drag state (group create/add, reorder, drag-out).
     private AppRow? _dragTile;
@@ -353,6 +486,9 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         base.OnSourceInitialized(e);
 
+        _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+        _windowSource?.AddHook(WindowMessageHook);
+
         // Capture the desktop BEFORE this window paints over it. The tiny
         // snapshot upscaled behind the scrim replaces the DWM blur accent —
         // it is a one-shot static image, so nothing per-frame remains.
@@ -389,6 +525,11 @@ public partial class MainWindow : INotifyPropertyChanged
         _iconCts?.Cancel();
         _iconCts?.Dispose();
         _iconCts = null;
+        _uninstallEligibilityCts?.Cancel();
+        _uninstallEligibilityCts?.Dispose();
+        _uninstallEligibilityCts = null;
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
         base.OnClosed(e);
     }
 
@@ -671,7 +812,12 @@ public partial class MainWindow : INotifyPropertyChanged
         }
 
         if (!keepPage)
+        {
             _pageIndex = 0;
+            _keyboardSelectedTile = null;
+        }
+        if (_keyboardSelectedTile is not null && !_filtered.Contains(_keyboardSelectedTile))
+            _keyboardSelectedTile = null;
         RenderPage(0);
     }
     // Shows only the current page slice; `direction` (+1 next / -1 previous /
@@ -687,28 +833,14 @@ public partial class MainWindow : INotifyPropertyChanged
         if (_pageIndex >= pageCount)
             _pageIndex = pageCount - 1;
 
-        var source = _reorderPreview ?? _filtered;
-        var pageStart = _pageIndex * _pageSize;
-        var slice = source
-            .Skip(pageStart)
-            .Take(_pageSize)
-            .ToList();
-        if (_openGroup is not null && slice.Contains(_openGroup))
-        {
-            // Keep the expanded folder at its original list position and push
-            // ordinary tiles off the page to pay for its additional cells.
-            for (var i = 0; i < extraGroupSlots && slice.Count > 1; i++)
-            {
-                var removeAt = slice.Count - 1;
-                if (ReferenceEquals(slice[removeAt], _openGroup))
-                    removeAt--;
-                if (removeAt >= 0)
-                    slice.RemoveAt(removeAt);
-            }
-        }
+        var slice = BuildCurrentPageSlice(_reorderPreview ?? _filtered);
 
         SyncVisibleTiles(slice);
-        AppsList.SelectedIndex = -1;
+        AppsList.SelectedItem = _openGroup is null
+            && _keyboardSelectedTile is not null
+            && slice.Contains(_keyboardSelectedTile)
+                ? _keyboardSelectedTile
+                : null;
 
         UpdatePageDots(pageCount);
         // While a background rescan runs, RefreshAppsAsync owns the status
@@ -722,6 +854,27 @@ public partial class MainWindow : INotifyPropertyChanged
             AnimatePage(direction);
     }
 
+    private List<ITileRow> BuildCurrentPageSlice(IReadOnlyList<ITileRow> source)
+    {
+        var extraGroupSlots = _openGroup is null ? 0 : _openGroup.ExpandedSlotCount - 1;
+        var pageStart = _pageIndex * Math.Max(1, _pageSize);
+        var slice = source.Skip(pageStart).Take(_pageSize).ToList();
+        if (_openGroup is not null && slice.Contains(_openGroup))
+        {
+            // Keep the expanded folder at its original list position and push
+            // ordinary tiles off the page to pay for its additional cells.
+            for (var i = 0; i < extraGroupSlots && slice.Count > 1; i++)
+            {
+                var removeAt = slice.Count - 1;
+                if (ReferenceEquals(slice[removeAt], _openGroup))
+                    removeAt--;
+                if (removeAt >= 0)
+                    slice.RemoveAt(removeAt);
+            }
+        }
+        return slice;
+    }
+
     private void UpdatePageDots(int pageCount)
     {
         PageDots.Children.Clear();
@@ -731,15 +884,51 @@ public partial class MainWindow : INotifyPropertyChanged
                 ? System.Windows.Media.Color.FromRgb(0x6C, 0x8C, 0xFF)
                 : System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF));
             brush.Freeze();
-            var dot = new System.Windows.Shapes.Ellipse
+            var dotShape = new System.Windows.Shapes.Ellipse
             {
                 Width = i == _pageIndex ? 9 : 7,
                 Height = 7,
-                Margin = new Thickness(3, 0, 3, 0),
                 Fill = brush
             };
+            var dot = new System.Windows.Controls.Button
+            {
+                Width = 18,
+                Height = 16,
+                Padding = new Thickness(4),
+                Margin = new Thickness(1, 0, 1, 0),
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Content = dotShape,
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Tag = i,
+                ToolTip = $"Page {i + 1}"
+            };
+            dot.Click += OnPageDotClick;
             PageDots.Children.Add(dot);
         }
+    }
+
+    private void OnPageDotClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: int page } || page == _pageIndex)
+            return;
+        if (_openGroup is not null)
+            CloseGroup(false);
+        GoToPage(page);
+        e.Handled = true;
+    }
+
+    private void GoToPage(int page)
+    {
+        var pageCount = Math.Max(1, (int)Math.Ceiling(_filtered.Count / (double)Math.Max(1, _pageSize)));
+        page = Math.Clamp(page, 0, pageCount - 1);
+        if (page == _pageIndex || _pageAnimationRunning)
+            return;
+        CaptureOutgoingPage();
+        var direction = page > _pageIndex ? 1 : -1;
+        _pageIndex = page;
+        _keyboardSelectedTile = _filtered.Skip(_pageIndex * _pageSize).FirstOrDefault();
+        RenderPage(direction);
     }
 
     // Page flip glides like a camera across one continuous icon surface.
@@ -928,6 +1117,31 @@ public partial class MainWindow : INotifyPropertyChanged
         e.Handled = true;
     }
 
+    private const int WmMouseHWheel = 0x020E;
+
+    private IntPtr WindowMessageHook(
+        IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message != WmMouseHWheel || SettingsOverlay.Visibility == Visibility.Visible)
+            return IntPtr.Zero;
+
+        var delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+        _horizontalWheelDelta += delta;
+        if (Math.Abs(_horizontalWheelDelta) < 120)
+            return IntPtr.Zero;
+
+        var direction = Math.Sign(_horizontalWheelDelta);
+        _horizontalWheelDelta = 0;
+        if (_openGroup is not null)
+            ChangeOpenGroupPage(_openGroup.MemberPageIndex + direction);
+        else if (direction > 0)
+            NextPage();
+        else
+            PreviousPage();
+        handled = true;
+        return IntPtr.Zero;
+    }
+
     // ── Page sizing ─────────────────────────────────────────────────
     // Unified with RecomputeLayout: measured AppsList size wins, otherwise
     // fall back to the window size minus the known chrome (search + status).
@@ -1077,7 +1291,8 @@ public partial class MainWindow : INotifyPropertyChanged
 
         if (_openGroup is not null)
         {
-            if (FindInlineGroupMember(e.OriginalSource as DependencyObject) is { } groupTile)
+            var source = e.OriginalSource as DependencyObject;
+            if (FindInlineGroupMember(source) is { } groupTile)
             {
                 // Custom mouse-move/up drag (ghost + placeholder). Do NOT start
                 // a blocking Ole DoDragDrop here: it suppresses MouseMove/MouseUp
@@ -1085,6 +1300,14 @@ public partial class MainWindow : INotifyPropertyChanged
                 _dragTile = groupTile;
                 _tileDragArmed = false;
                 _tileDragFromGroup = true;
+            }
+            else if (FindTileContainer(source) is { DataContext: AppRow outsideApp })
+            {
+                // Ordinary tiles remain draggable while a folder is open so
+                // they can be dropped directly into the expanded folder.
+                _dragTile = outsideApp;
+                _tileDragArmed = false;
+                _tileDragFromGroup = false;
             }
             return;
         }
@@ -1168,11 +1391,17 @@ public partial class MainWindow : INotifyPropertyChanged
             PersistGroups();
             RefreshAllGroupPreviews();
             if (_openGroup is not null && _openGroup == target)
-                OpenGroup(target); // re-render members
+            {
+                target.ShowLastMemberPage();
+                OpenGroup(target); // re-render members and reveal the new app
+            }
         }
     }
 
-    private void RemoveFromGroup(AppRow member)
+    private void RemoveFromGroup(
+        AppRow member,
+        ITileRow? insertBefore = null,
+        bool appendWhenNoAnchor = false)
     {
         if (_openGroup is null)
             return;
@@ -1212,12 +1441,22 @@ public partial class MainWindow : INotifyPropertyChanged
             return;
         }
 
-        // Larger folders stay open. The extracted app is inserted directly
-        // after the folder and ApplyFilter rebuilds the main flow immediately.
-        if (groupIndex >= 0)
-            _orderIds.Insert(Math.Min(groupIndex + 1, _orderIds.Count), member.App.Id);
-        else
-            _orderIds.Add(member.App.Id);
+        // Larger folders stay open. A live drag preview provides the tile
+        // that should follow the extracted app, so the persisted order agrees
+        // with the moving placeholder and the main grid keeps flowing around
+        // it. A simple remove-button click still returns it beside the folder.
+        var insertAt = appendWhenNoAnchor
+            ? _orderIds.Count
+            : groupIndex >= 0
+                ? groupIndex + 1
+                : _orderIds.Count;
+        if (insertBefore is not null)
+        {
+            var anchorIndex = _orderIds.IndexOf(TileId(insertBefore));
+            if (anchorIndex >= 0)
+                insertAt = anchorIndex;
+        }
+        _orderIds.Insert(Math.Min(insertAt, _orderIds.Count), member.App.Id);
         _ = _layoutStore.SaveAsync(_orderIds);
         PersistGroups();
         RefreshAllGroupPreviews();
@@ -1242,7 +1481,7 @@ public partial class MainWindow : INotifyPropertyChanged
         return true;
     }
 
-    // Enter launches the first visible tile (selection itself is never shown).
+    // Fallback used before keyboard navigation has selected a visible tile.
     private ITileRow? FirstVisibleTile()
     {
         return _filtered.FirstOrDefault(t => IsOnCurrentPage(t));
@@ -1259,7 +1498,10 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void LaunchSelected()
     {
-        var selected = FirstVisibleTile();
+        var selected = _keyboardSelectedTile is not null
+            && IsOnCurrentPage(_keyboardSelectedTile)
+                ? _keyboardSelectedTile
+                : FirstVisibleTile();
         if (selected is GroupRow groupRow)
         {
             OpenGroup(groupRow);
@@ -1271,16 +1513,116 @@ public partial class MainWindow : INotifyPropertyChanged
         }
     }
 
+    private void MoveKeyboardSelection(Key key)
+    {
+        if (_openGroup is not null)
+            MoveOpenGroupKeyboardSelection(key);
+        else
+            MoveMainKeyboardSelection(key);
+    }
+
+    private void MoveMainKeyboardSelection(Key key)
+    {
+        if (_filtered.Count == 0)
+            return;
+
+        var current = _keyboardSelectedTile is null
+            ? -1
+            : _filtered.IndexOf(_keyboardSelectedTile);
+        if (current < 0)
+        {
+            SelectMainTileAt(Math.Min(_filtered.Count - 1, _pageIndex * Math.Max(1, _pageSize)));
+            return;
+        }
+
+        var width = AppsList.ActualWidth >= 100 ? AppsList.ActualWidth : Math.Max(100, ActualWidth - 80);
+        var height = AppsList.ActualHeight >= 100 ? AppsList.ActualHeight : Math.Max(100, ActualHeight - 160);
+        var (columns, _) = GridDimsFor(width, height, GridCellWidth, GridCellHeight);
+        var delta = key switch
+        {
+            Key.Left => -1,
+            Key.Right => 1,
+            Key.Up => -columns,
+            Key.Down => columns,
+            _ => 0
+        };
+        SelectMainTileAt(Math.Clamp(current + delta, 0, _filtered.Count - 1));
+    }
+
+    private void SelectMainTileAt(int absoluteIndex)
+    {
+        if (_filtered.Count == 0)
+            return;
+        absoluteIndex = Math.Clamp(absoluteIndex, 0, _filtered.Count - 1);
+        var targetPage = absoluteIndex / Math.Max(1, _pageSize);
+        var direction = Math.Sign(targetPage - _pageIndex);
+        if (direction != 0)
+        {
+            CaptureOutgoingPage();
+            _pageIndex = targetPage;
+        }
+
+        _keyboardSelectedTile = _filtered[absoluteIndex];
+        RenderPage(direction);
+    }
+
+    private void MoveOpenGroupKeyboardSelection(Key key)
+    {
+        if (_openGroup is not { Members.Count: > 0 } group)
+            return;
+
+        var selectedOnPage = group.SelectedVisibleMemberIndex();
+        var current = selectedOnPage < 0
+            ? group.MemberPageIndex * GroupRow.MembersPerPage
+            : group.MemberPageIndex * GroupRow.MembersPerPage + selectedOnPage;
+        var visibleCapacity = Math.Min(group.Members.Count, GroupRow.MembersPerPage);
+        var columns = visibleCapacity <= 4 ? 2 : 3;
+        var delta = key switch
+        {
+            Key.Left => -1,
+            Key.Right => 1,
+            Key.Up => -columns,
+            Key.Down => columns,
+            _ => 0
+        };
+        var target = Math.Clamp(current + delta, 0, group.Members.Count - 1);
+        var targetPage = target / GroupRow.MembersPerPage;
+        if (targetPage != group.MemberPageIndex)
+            group.SetMemberPage(targetPage);
+        group.SelectVisibleMember(target % GroupRow.MembersPerPage);
+        RenderPage(0);
+    }
+
     // ── Group (folder) operations ─────────────────────────────────
     // A folder expands in place inside the main WrapPanel. Its larger desired
     // size participates in layout, so later tiles naturally move around it.
     private void OpenGroup(GroupRow gr, System.Windows.Point? preferredCenter = null)
     {
         if (_openGroup is not null && !ReferenceEquals(_openGroup, gr))
+        {
+            _openGroup.ClearMemberSelection();
             _openGroup.IsExpanded = false;
+        }
         _openGroup = gr;
+        _keyboardSelectedTile = gr;
         gr.IsExpanded = true;
+        gr.SelectVisibleMember(0);
         GroupOverlay.Visibility = Visibility.Collapsed;
+        RenderPage(0);
+    }
+
+    private void OnGroupMemberPageClick(object sender, RoutedEventArgs e)
+    {
+        if (_openGroup is null || sender is not FrameworkElement { Tag: int page })
+            return;
+        ChangeOpenGroupPage(page);
+        e.Handled = true;
+    }
+
+    private void ChangeOpenGroupPage(int page)
+    {
+        if (_openGroup is null || !_openGroup.SetMemberPage(page))
+            return;
         RenderPage(0);
     }
 
@@ -1323,7 +1665,11 @@ public partial class MainWindow : INotifyPropertyChanged
     private void CloseGroup(bool relaunchFilter = true)
     {
         if (_openGroup is not null)
+        {
+            _openGroup.ClearMemberSelection();
+            _openGroup.IsDropTarget = false;
             _openGroup.IsExpanded = false;
+        }
         _openGroup = null;
         GroupOverlay.Visibility = Visibility.Collapsed;
         ScrimDim.Opacity = 0;
@@ -1515,6 +1861,8 @@ public partial class MainWindow : INotifyPropertyChanged
         var bestScore = double.PositiveInfinity;
         foreach (var item in AppsList.Items.OfType<ITileRow>())
         {
+            if (ReferenceEquals(item, AnyDragTile))
+                continue;
             if (AppsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
                 continue;
             System.Windows.Point center;
@@ -1567,6 +1915,20 @@ public partial class MainWindow : INotifyPropertyChanged
         RenderPageGlide();
     }
 
+    // A member being pulled out of an expanded folder is not part of the
+    // main-grid source yet. Insert a temporary placeholder at the pointer's
+    // target so the surrounding main tiles visibly make room before release.
+    private void BuildGroupMemberDragOutPreview()
+    {
+        if (_dragTile is not { } dragged)
+            return;
+        var preview = _filtered.ToList();
+        preview.Insert(Math.Clamp(_dragTargetIndex, 0, preview.Count), dragged);
+        dragged.ShowAsPlaceholder = true;
+        _reorderPreview = preview;
+        RenderPageGlide();
+    }
+
     // Soft rearrange: FLIP-glide every visible tile from its old position
     // to its new one instead of snapping (macOS Launchpad flow-around).
     // First: record centers, Last: re-render, Invert: offset back, Play:
@@ -1588,11 +1950,7 @@ public partial class MainWindow : INotifyPropertyChanged
                 c.RenderTransform = null;
             }
         }
-        var pageStart = _pageIndex * Math.Max(1, _pageSize);
-        var desired = (_reorderPreview ?? _filtered)
-            .Skip(pageStart)
-            .Take(_pageSize)
-            .ToList();
+        var desired = BuildCurrentPageSlice(_reorderPreview ?? _filtered);
 
         // A drag normally changes one item's index. ObservableCollection.Move
         // keeps all generated containers and their cached tile visuals alive.
@@ -1682,7 +2040,8 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void OnUninstallClick(object sender, RoutedEventArgs e)
     {
-        if (FindRowFromSender(sender) is { } row)
+        if (FindRowFromSender(sender) is { } row
+            && UninstallerService.CanUninstall(row.App))
         {
             UninstallerService.LaunchUninstall(row.App);
         }
@@ -1697,18 +2056,55 @@ public partial class MainWindow : INotifyPropertyChanged
         _jiggleMode = true;
         _tileDragArmed = false;
         foreach (var row in _rows)
-            row.ShowUninstallBadge = true;
+            row.ShowUninstallBadge = false;
         foreach (var gr in _groupRows)
             gr.ShowRemoveBadge = true;
+        _ = RefreshUninstallBadgesAsync();
     }
 
     private void ExitJiggle()
     {
         _jiggleMode = false;
+        _uninstallEligibilityCts?.Cancel();
+        _uninstallEligibilityCts?.Dispose();
+        _uninstallEligibilityCts = null;
         foreach (var row in _rows)
             row.ShowUninstallBadge = false;
         foreach (var gr in _groupRows)
             gr.ShowRemoveBadge = false;
+    }
+
+    private async Task RefreshUninstallBadgesAsync()
+    {
+        _uninstallEligibilityCts?.Cancel();
+        _uninstallEligibilityCts?.Dispose();
+        _uninstallEligibilityCts = new CancellationTokenSource();
+        var ct = _uninstallEligibilityCts.Token;
+        var snapshot = _rows.ToList();
+
+        try
+        {
+            var removableIds = await Task.Run(() =>
+            {
+                var result = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var row in snapshot)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (UninstallerService.CanUninstall(row.App))
+                        result.Add(row.App.Id);
+                }
+                return result;
+            }, ct);
+
+            if (!_jiggleMode || ct.IsCancellationRequested)
+                return;
+            foreach (var row in _rows)
+                row.ShowUninstallBadge = removableIds.Contains(row.App.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            // Leaving jiggle mode or closing the window cancels the scan.
+        }
     }
 
     // ── Drag: mouse-move (ghost + swipe flip) ─────────────────────
@@ -1813,8 +2209,33 @@ public partial class MainWindow : INotifyPropertyChanged
                 if (_dragTile is not null)
                     UpdateGroupDropPreview(gridPos);
             }
+            else if (_tileDragFromGroup && _dragTile is not null && _openGroup is { } openGroup)
+            {
+                var gridPos = e.GetPosition(AppsList);
+                if (!IsPointOverTile(openGroup, gridPos, 0))
+                {
+                    var target = ComputeDragTargetIndex(gridPos);
+                    var now = Environment.TickCount64;
+                    if (target != _dragTargetIndex && now - _lastReorderMs >= 50)
+                    {
+                        _lastReorderMs = now;
+                        _dragTargetIndex = target;
+                        BuildGroupMemberDragOutPreview();
+                    }
+                }
+                else if (_reorderPreview is not null)
+                {
+                    ClearDragPreview();
+                    RenderPage(0);
+                }
+            }
+            else if (!_tileDragFromGroup && _dragTile is not null && _openGroup is not null)
+            {
+                UpdateOpenGroupDropPreview(e.GetPosition(AppsList));
+            }
 
-            UpdateEdgePageFlip(e.GetPosition(AppsList));
+            if (_openGroup is null)
+                UpdateEdgePageFlip(e.GetPosition(AppsList));
         }
     }
 
@@ -1919,6 +2340,15 @@ public partial class MainWindow : INotifyPropertyChanged
         HighlightHoverTarget(over, true);
     }
 
+    private void UpdateOpenGroupDropPreview(System.Windows.Point gridPos)
+    {
+        if (_openGroup is null)
+            return;
+        var isOver = IsPointOverTile(_openGroup, gridPos, 0);
+        _openGroup.IsDropTarget = isOver;
+        _hoverGroupTarget = isOver ? _openGroup : null;
+    }
+
     private bool IsPointOverTile(ITileRow tile, System.Windows.Point point, double tolerance)
     {
         if (AppsList.ItemContainerGenerator.ContainerFromItem(tile) is not ListBoxItem container)
@@ -1950,6 +2380,8 @@ public partial class MainWindow : INotifyPropertyChanged
 
     private void ClearGroupDropPreview()
     {
+        if (_hoverGroupTarget is GroupRow group)
+            group.IsDropTarget = false;
         _hoverGroupTarget = null;
         HighlightHoverTarget(null, false);
     }
@@ -2012,6 +2444,7 @@ public partial class MainWindow : INotifyPropertyChanged
     {
         StopEdgePageFlip(resetTrigger: true);
         var swiped = _dragConsumed;
+        var previewGroupTarget = _hoverGroupTarget as GroupRow;
         _dragConsumed = false;
         _dragOrigin = null;
         StopHoldTimer();
@@ -2079,13 +2512,25 @@ public partial class MainWindow : INotifyPropertyChanged
             if (fromGroup && _openGroup is { } og && source is not null
                 && og.Group.MemberIds.Contains(source.App.Id))
             {
+                if (IsPointOverTile(og, e.GetPosition(AppsList), 0))
+                {
+                    ResetDragState();
+                    return;
+                }
+                var previewIndex = _reorderPreview?.IndexOf(source) ?? -1;
+                var insertBefore = previewIndex >= 0 && _reorderPreview is not null
+                    ? _reorderPreview.Skip(previewIndex + 1).FirstOrDefault()
+                    : null;
+                var appendWhenNoAnchor = previewIndex >= 0
+                    && previewIndex == _reorderPreview!.Count - 1;
                 ResetDragState();
-                RemoveFromGroup(source);
+                RemoveFromGroup(source, insertBefore, appendWhenNoAnchor);
                 return;
             }
 
             var targetContainer = FindTileContainer(e.OriginalSource as DependencyObject);
-            if (source is not null && targetContainer?.DataContext is GroupRow targetGroup)
+            var targetGroup = targetContainer?.DataContext as GroupRow ?? previewGroupTarget;
+            if (source is not null && targetGroup is not null)
             {
                 ResetDragState();
                 AddToGroup(targetGroup, source);
@@ -2490,14 +2935,20 @@ public partial class MainWindow : INotifyPropertyChanged
             if (_openGroup is not null && GroupNameBox.IsKeyboardFocusWithin)
             {
                 CommitGroupName();
-                CloseGroup();
+                Keyboard.ClearFocus();
             }
-            // Enter elsewhere inside an open folder closes it back to the
-            // grid; it must never launch the first tile underneath.
-            else if (_openGroup is not null)
-                CloseGroup();
+            else if (_openGroup?.SelectedMember is { } member)
+                TryLaunch(member);
             else
                 LaunchSelected();
+            e.Handled = true;
+            return;
+        }
+        if (SettingsOverlay.Visibility == Visibility.Visible)
+            return;
+        if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
+        {
+            MoveKeyboardSelection(e.Key);
             e.Handled = true;
             return;
         }
@@ -2505,6 +2956,8 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (_jiggleMode)
                 ExitJiggle();
+            else if (_openGroup is not null)
+                ChangeOpenGroupPage(_openGroup.MemberPageIndex + 1);
             else
                 NextPage();
             e.Handled = true;
@@ -2514,18 +2967,12 @@ public partial class MainWindow : INotifyPropertyChanged
         {
             if (_jiggleMode)
                 ExitJiggle();
+            else if (_openGroup is not null)
+                ChangeOpenGroupPage(_openGroup.MemberPageIndex - 1);
             else
                 PreviousPage();
             e.Handled = true;
             return;
-        }
-        if ((e.Key == Key.Left || e.Key == Key.Right) && SearchBox.Text.Length == 0)
-        {
-            if (e.Key == Key.Left)
-                PreviousPage();
-            else
-                NextPage();
-            e.Handled = true;
         }
     }
 

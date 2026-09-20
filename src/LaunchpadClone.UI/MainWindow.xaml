@@ -171,7 +171,7 @@
                 <Button Click="OnUninstallClick" ToolTip="Uninstall" Cursor="Hand"
                         Style="{StaticResource AnimatedDeleteBadgeStyle}"
                         Background="#CCC0392B" Template="{StaticResource BadgeTemplate}"
-                        Width="22" Height="22" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Width="22" Height="22" HorizontalAlignment="Right" VerticalAlignment="Top"
                         Visibility="{Binding ShowUninstallBadge, Converter={StaticResource BoolToVisibility}}" />
             </Grid>
         </DataTemplate>
@@ -234,7 +234,7 @@
                                      LostKeyboardFocus="OnInlineGroupNameLostFocus"
                                      KeyDown="OnInlineGroupNameKeyDown" />
                         </Grid>
-                        <ItemsControl ItemsSource="{Binding Members}">
+                        <ItemsControl ItemsSource="{Binding VisibleMembers}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <WrapPanel HorizontalAlignment="Center" />
@@ -244,8 +244,20 @@
                                 <DataTemplate>
                                     <Border Tag="InlineGroupMember"
                                             Width="{Binding TileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            Margin="4,6" Padding="5" CornerRadius="10" Background="Transparent"
-                                            Cursor="Hand">
+                                            Margin="4,6" Padding="5" CornerRadius="10"
+                                            BorderThickness="1" Cursor="Hand">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsKeyboardSelected}" Value="True">
+                                                        <Setter Property="Background" Value="#346C8CFF" />
+                                                        <Setter Property="BorderBrush" Value="#887C9CFF" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
                                         <StackPanel>
                                             <Image Source="{Binding Icon}"
                                                    Width="{Binding TileIconSize, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -257,6 +269,35 @@
                                                        TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
                                     </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding MemberPages}" Margin="0,7,0,0"
+                                      HorizontalAlignment="Center"
+                                      Visibility="{Binding HasMultipleMemberPages, Converter={StaticResource BoolToVisibility}}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Tag="{Binding Index}" Click="OnGroupMemberPageClick"
+                                            Width="18" Height="16" Padding="4" Margin="1,0"
+                                            Background="Transparent" BorderThickness="0" Cursor="Hand">
+                                        <Ellipse Width="7" Height="7">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="#58FFFFFF" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                            <Setter Property="Fill" Value="#FF7C9CFF" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                    </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
@@ -299,6 +340,10 @@
                         </BeginStoryboard>
                     </DataTrigger.EnterActions>
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                    <Setter TargetName="ExpandedFolder" Property="Background" Value="#467C9CFF" />
+                    <Setter TargetName="ExpandedFolder" Property="BorderBrush" Value="#CC9CB2FF" />
+                </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
 
@@ -319,12 +364,17 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" CornerRadius="14" Padding="{TemplateBinding Padding}"
-                                Background="Transparent" SnapsToDevicePixels="True">
+                                Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                                SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#2EFFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#346C8CFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#887C9CFF" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -448,7 +498,7 @@
                 </Image>
             </Grid>
 
-            <StackPanel Grid.Row="2" HorizontalAlignment="Center">
+            <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,0,0,28">
                 <!-- Page indicator dots; they brighten on flips and fade back. -->
                 <StackPanel x:Name="PageDots" Orientation="Horizontal"
                             HorizontalAlignment="Center" Opacity="0.45" />
